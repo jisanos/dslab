@@ -25,6 +25,13 @@ impl<T> QueueSet<T> {
         Self { queues }
     }
 
+    /// Expands the number of queues n the QueueSet.
+    pub fn add_queues(&mut self, num_queues: usize) {
+        for _ in 0..num_queues {
+            self.queues.push(VecDeque::new());
+        }
+    }
+
     /// Enqueues specified task to the specified processor's task queue.
     /// The queue_index specifies which processor the queue belongs to.
     /// The value is the task_id.
@@ -52,51 +59,51 @@ impl<T> QueueSet<T> {
 
 /// Returns a topologically sorted order of task references based on their dependencies.
 /// Each task appears after all of its dependencies. If a cycle exists, returns None.
-fn topological_sort<'a>(tasks: &'a [Task]) -> Option<VecDeque<usize>> {
-    let n = tasks.len();
-    // Create a vector to store the in-degree (number of dependencies) of each task.
-    let mut in_degree = vec![0; n];
+// fn topological_sort<'a>(tasks: &'a [Task]) -> Option<VecDeque<usize>> {
+//     let n = tasks.len();
+//     // Create a vector to store the in-degree (number of dependencies) of each task.
+//     let mut in_degree = vec![0; n];
 
-    // For each task, the in-degree is the number of tasks it depends on.
-    for (i, task) in tasks.iter().enumerate() {
-        in_degree[i] = task.inputs.len();
-    }
+//     // For each task, the in-degree is the number of tasks it depends on.
+//     for (i, task) in tasks.iter().enumerate() {
+//         in_degree[i] = task.inputs.len();
+//     }
 
-    // Start with tasks that have no dependencies.
-    let mut queue = VecDeque::new();
-    for i in 0..n {
-        if in_degree[i] == 0 {
-            queue.push_back(i);
-        }
-    }
+//     // Start with tasks that have no dependencies.
+//     let mut queue = VecDeque::new();
+//     for i in 0..n {
+//         if in_degree[i] == 0 {
+//             queue.push_back(i);
+//         }
+//     }
 
-    let mut sorted_indices = VecDeque::new();
+//     let mut sorted_indices = VecDeque::new();
 
-    // Process tasks with no remaining dependencies.
-    while let Some(task_id) = queue.pop_front() {
-        sorted_indices.push_back(task_id);
+//     // Process tasks with no remaining dependencies.
+//     while let Some(task_id) = queue.pop_front() {
+//         sorted_indices.push_back(task_id);
 
-        // For each task that depends on the current task...
-        for &dependent in &tasks[task_id].outputs {
-            // Decrement the in-degree since one dependency is satisfied.
-            in_degree[dependent] -= 1;
-            // If this task has no more dependencies, add it to the queue.
-            if in_degree[dependent] == 0 {
-                queue.push_back(dependent);
-            }
-        }
-    }
+//         // For each task that depends on the current task...
+//         for &dependent in &tasks[task_id].outputs {
+//             // Decrement the in-degree since one dependency is satisfied.
+//             in_degree[dependent] -= 1;
+//             // If this task has no more dependencies, add it to the queue.
+//             if in_degree[dependent] == 0 {
+//                 queue.push_back(dependent);
+//             }
+//         }
+//     }
 
-    // If we processed all tasks, convert indices to references.
-    if sorted_indices.len() == n {
-        Some(sorted_indices)
-        // let sorted_tasks: VecDeque<&Task> = sorted_indices.into_iter().map(|i| &tasks[i]).collect();
-        // Some(sorted_tasks)
-    } else {
-        // A cycle exists in the dependency graph.
-        None
-    }
-}
+//     // If we processed all tasks, convert indices to references.
+//     if sorted_indices.len() == n {
+//         Some(sorted_indices)
+//         // let sorted_tasks: VecDeque<&Task> = sorted_indices.into_iter().map(|i| &tasks[i]).collect();
+//         // Some(sorted_tasks)
+//     } else {
+//         // A cycle exists in the dependency graph.
+//         None
+//     }
+// }
 pub struct DynamicTaskSchedulingAlgorithm {
     // ptq will be used to keep track of the dag task_id's
     // that are to be executed on each system resource
@@ -104,20 +111,30 @@ pub struct DynamicTaskSchedulingAlgorithm {
 
     // You can alternatively make this a queue set of
     // strings to store the task's name instead.
-    processor_task_queues: QueueSet<usize>
+    processor_task_queues: QueueSet<usize>,
+
+    // This will contain the task_id's of
+    // tasks that have already been completed
+    completed_task_queue: Vec<usize>
 }
 
 impl DynamicTaskSchedulingAlgorithm {
     pub fn new() -> Self {
         DynamicTaskSchedulingAlgorithm {
-            // TODO: I wish i could just make this empty or null but it has been
-            // a pain to do.
-            processor_task_queues: QueueSet::new(0)
+            // There are no ptqs when initializing the algorithm
+            // but it will expands once it starts.
+            processor_task_queues: QueueSet::new(0),
+            completed_task_queue: Vec::new()
         }
     }
 
-    pub fn initialize_processor_task_queues(&mut self, system: &System) {
-        self.processor_task_queues = QueueSet::new(system.resources.len());
+    pub fn initialize_ptqs(&mut self, system: &System) {
+        // self.processor_task_queues = QueueSet::new(system.resources.len());
+        self.processor_task_queues.add_queues(system.resources.len());
+    }
+
+    pub fn add_task_to_ctq(&mut self, task_id:usize){
+        self.completed_task_queue.push(task_id);
     }
 
     fn schedule(&mut self, dag: &DAG, system: System, ctx: &SimulationContext) -> Vec<Action> {
@@ -140,7 +157,7 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
         // Initialize processor task queue for each resource,
         // according to the
         // number of resources available.
-        self.initialize_processor_task_queues(&system);
+        self.initialize_ptqs(&system);
 
         // Getting the tasks from the dag into the
         // initial task queue
@@ -151,6 +168,7 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
         // NOTE: Consider swapping for topsort in common.rs
         // let mut dispatch_task_queue = topological_sort(&initial_task_queue).expect("Cycle detected in task dependencies");
         let mut dispatch_task_queue = topsort(dag);
+        dispatch_task_queue.reverse(); // Reversing so that I can pop easily next in sorted order.
 
         // Distributing tasks into the processor_task_queues
         while !dispatch_task_queue.is_empty() {
