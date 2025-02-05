@@ -21,6 +21,7 @@ use crate::schedulers::heft::HeftScheduler;
 use crate::schedulers::lookahead::LookaheadScheduler;
 use crate::schedulers::peft::PeftScheduler;
 use crate::schedulers::simple_scheduler::SimpleScheduler;
+use crate::schedulers::dytas::DynamicTaskSchedulingAlgorithm;
 
 /// Represents an action ordered by the scheduler.
 #[derive(Debug)]
@@ -163,6 +164,7 @@ impl std::fmt::Display for SchedulerParams {
 pub fn default_scheduler_resolver(params: &SchedulerParams) -> Option<RcScheduler> {
     match params.name.as_str() {
         "Simple" => Some(Rc::new(RefCell::new(SimpleScheduler::new()))),
+        "DYTAS" => Some(Rc::new(RefCell::new(DynamicTaskSchedulingAlgorithm::new()))),
         "DynamicList" => Some(Rc::new(RefCell::new(DynamicListScheduler::from_params(params)))),
         "HEFT" => Some(Rc::new(RefCell::new(HeftScheduler::from_params(params)))),
         "Lookahead" => Some(Rc::new(RefCell::new(LookaheadScheduler::from_params(params)))),

@@ -8,4 +8,5 @@ pub mod lookahead;
 pub mod peft;
 pub mod simple_scheduler;
 pub mod simple_with_data;
+pub mod dytas;
 mod treap;
