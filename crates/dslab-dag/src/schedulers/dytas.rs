@@ -55,55 +55,12 @@ impl<T> QueueSet<T> {
     pub fn get_element_mut(&mut self, queue_index: usize, queue_sub_index: usize) -> Option<&mut T> {
         self.queues.get_mut(queue_index)?.get_mut(queue_sub_index)
     }
+
+    pub fn get_queue(&self, index: usize) -> Option<&VecDeque<T>> {
+        self.queues.get(index)
+    }
 }
 
-/// Returns a topologically sorted order of task references based on their dependencies.
-/// Each task appears after all of its dependencies. If a cycle exists, returns None.
-// fn topological_sort<'a>(tasks: &'a [Task]) -> Option<VecDeque<usize>> {
-//     let n = tasks.len();
-//     // Create a vector to store the in-degree (number of dependencies) of each task.
-//     let mut in_degree = vec![0; n];
-
-//     // For each task, the in-degree is the number of tasks it depends on.
-//     for (i, task) in tasks.iter().enumerate() {
-//         in_degree[i] = task.inputs.len();
-//     }
-
-//     // Start with tasks that have no dependencies.
-//     let mut queue = VecDeque::new();
-//     for i in 0..n {
-//         if in_degree[i] == 0 {
-//             queue.push_back(i);
-//         }
-//     }
-
-//     let mut sorted_indices = VecDeque::new();
-
-//     // Process tasks with no remaining dependencies.
-//     while let Some(task_id) = queue.pop_front() {
-//         sorted_indices.push_back(task_id);
-
-//         // For each task that depends on the current task...
-//         for &dependent in &tasks[task_id].outputs {
-//             // Decrement the in-degree since one dependency is satisfied.
-//             in_degree[dependent] -= 1;
-//             // If this task has no more dependencies, add it to the queue.
-//             if in_degree[dependent] == 0 {
-//                 queue.push_back(dependent);
-//             }
-//         }
-//     }
-
-//     // If we processed all tasks, convert indices to references.
-//     if sorted_indices.len() == n {
-//         Some(sorted_indices)
-//         // let sorted_tasks: VecDeque<&Task> = sorted_indices.into_iter().map(|i| &tasks[i]).collect();
-//         // Some(sorted_tasks)
-//     } else {
-//         // A cycle exists in the dependency graph.
-//         None
-//     }
-// }
 pub struct DynamicTaskSchedulingAlgorithm {
     // ptq will be used to keep track of the dag task_id's
     // that are to be executed on each system resource
@@ -115,7 +72,7 @@ pub struct DynamicTaskSchedulingAlgorithm {
 
     // This will contain the task_id's of
     // tasks that have already been completed
-    completed_task_queue: Vec<usize>
+    completed_task_queue: Vec<usize>,
 }
 
 impl DynamicTaskSchedulingAlgorithm {
@@ -124,7 +81,7 @@ impl DynamicTaskSchedulingAlgorithm {
             // There are no ptqs when initializing the algorithm
             // but it will expands once it starts.
             processor_task_queues: QueueSet::new(0),
-            completed_task_queue: Vec::new()
+            completed_task_queue: Vec::new(),
         }
     }
 
@@ -133,13 +90,83 @@ impl DynamicTaskSchedulingAlgorithm {
         self.processor_task_queues.add_queues(system.resources.len());
     }
 
-    pub fn add_task_to_ctq(&mut self, task_id:usize){
+    pub fn add_task_to_ctq(&mut self, task_id: usize) {
         self.completed_task_queue.push(task_id);
     }
 
     fn schedule(&mut self, dag: &DAG, system: System, ctx: &SimulationContext) -> Vec<Action> {
-        for k in 0..system.resources.len() {
+        for (k, resource) in system.resources.iter().enumerate() {
+            // Validate if the k'th processors is in
+            // a running state. This will be determined
+            // by validateing the number of available cores.
 
+            if resource.cores_available < resource.cores {
+                // This will be taken to indicate that
+                // the resource is in running state,
+                // thus we'll skip to the next processor
+                continue;
+            }
+
+            let ptq_k = self.processor_task_queues.get_queue(k).unwrap();
+
+            // Now, if the next task in ptq[k] has
+            // its dependent tasks resolved, then we
+            // execute it.
+
+            let mut task_id = ptq_k.get(0).unwrap();
+
+            let mut required_tasks_ids = &dag.get_task(*task_id).inputs;
+
+            if required_tasks_ids.is_empty() {
+                // If there are no input tasks
+                // then this is a starting task
+                // and it can be scheduled as is
+            } else {
+                // Otherwise, validate that all of the required
+                // task ids have been completed before executing.
+                let mut requirements_met = required_tasks_ids
+                    .iter()
+                    .all(|&id| self.completed_task_queue.contains(&id));
+
+                if requirements_met {
+                    // Schedule the task into the k'th processor.
+                } else {
+                    // Otherwise, we navigate to the other
+                    // ptqs and verify if they contain a task that
+                    // meet the criteria.
+
+                    // NOTE: I'm only validating the front task in each queue,
+                    // but I might have to change it so that it takes
+                    // into consideration their other queued tasks as well.
+                    for z in 0..system.resources.len() {
+                        if z == k {
+                            continue; // Skip current ptq
+                        }
+
+                        let ptq_z = self.processor_task_queues.get_queue(z).unwrap();
+
+                        task_id = ptq_z.get(0).unwrap();
+
+                        required_tasks_ids = &dag.get_task(*task_id).inputs;
+
+                        if required_tasks_ids.is_empty() {
+                            // No requirements means that it is good to be
+                            // executed
+                        } else {
+                            requirements_met = required_tasks_ids
+                                .iter()
+                                .all(|&id| self.completed_task_queue.contains(&id));
+
+                            if requirements_met {
+                                // Schedule task on k'th processor
+                            } else {
+                                // Otherwise, check next ptq
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Vec::new()
@@ -173,13 +200,13 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
         // Distributing tasks into the processor_task_queues
         while !dispatch_task_queue.is_empty() {
             for i in 0..system.resources.len() {
-                
                 if dispatch_task_queue.is_empty() {
                     // Just in case the dtq becomes empty during the
                     // inner loop
-                    break
+                    break;
                 }
-                self.processor_task_queues.enqueue(i, dispatch_task_queue.pop().unwrap());
+                self.processor_task_queues
+                    .enqueue(i, dispatch_task_queue.pop().unwrap());
             }
         }
 
