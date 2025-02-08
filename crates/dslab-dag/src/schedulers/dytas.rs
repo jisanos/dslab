@@ -4,7 +4,7 @@ use crate::runner::Config;
 use crate::scheduler::{Action, Scheduler};
 use crate::schedulers::common::topsort;
 use crate::system::System;
-use crate::task::*;
+use crate::task::TaskState;
 use simcore::context::SimulationContext;
 use std::collections::VecDeque;
 
@@ -61,12 +61,27 @@ impl<T> QueueSet<T> {
     }
 }
 
+/// Validates that the task is able to be executed in the specified resource.
+pub fn evaluate(dag: &DAG, task_id: usize, system: &System, resource: usize) -> bool {
+    let need_cores = dag.get_task(task_id).min_cores;
+    if system.resources[resource].compute.borrow().cores_total() < need_cores {
+        return false;
+    }
+    let need_memory = dag.get_task(task_id).memory;
+    if system.resources[resource].compute.borrow().memory_total() < need_memory {
+        return false;
+    }
+    if !dag.get_task(task_id).is_allowed_on(resource) {
+        return false;
+    }
+    true
+}
+
 pub struct DynamicTaskSchedulingAlgorithm {
     // ptq will be used to keep track of the dag task_id's
     // that are to be executed on each system resource
     // (assuming each "system" is a processor).
     processor_task_queues: QueueSet<usize>,
-
     // This will contain the task_id's of
     // tasks that have already been completed
 
@@ -74,7 +89,10 @@ pub struct DynamicTaskSchedulingAlgorithm {
     // task dependencies are met using
     // the tasks state, I woulnd't need
     // a list of completed tasks here.
-    // This can be done with task.inputs.len() == task.ready_inputs
+    // This can be done with task.inputs.len() == task.ready_inputs.
+    // This can also be done veryfing if task is in Ready state, as
+    // if it is still Pending it means that its dependencies
+    // have not been resolved yet.
     // completed_task_queue: Vec<usize>,
 }
 
@@ -95,7 +113,7 @@ impl DynamicTaskSchedulingAlgorithm {
     // TODO: Fix these errors:
     // [23.200 ERROR runner] Wrong action, resource 3 doesn't have enough cores
     // [23.200 ERROR runner] DAG is not completed, currently 1 Pending, 1 Ready, 4 Done tasks
-    fn schedule(&mut self, dag: &DAG, system: System, ctx: &SimulationContext) -> Vec<Action> {
+    fn schedule(&mut self, dag: &DAG, system: System, _ctx: &SimulationContext) -> Vec<Action> {
         let mut result = Vec::new();
 
         for (k, resource) in system.resources.iter().enumerate() {
@@ -134,16 +152,18 @@ impl DynamicTaskSchedulingAlgorithm {
             // task ids have been completed before executing.
 
             if task.inputs.len() == task.ready_inputs {
-                // Schedule the task into the k'th processor.
+                // Schedule the task into the k'th processor,
+                // if it passes the requirements to be
+                // assigned.
 
-                if dag.get_task(task_id).is_allowed_on(k) {
+                // if dag.get_task(task_id).is_allowed_on(k) {
+                if evaluate(dag, task_id, &system, k) {
                     result.push(Action::ScheduleTask {
                         task: ptq_k.pop_front().unwrap(),
                         resource: k,
                         cores: task.max_cores,
                         expected_span: None,
                     });
-
                 }
             } else {
                 // Otherwise, we navigate to the other
@@ -172,18 +192,15 @@ impl DynamicTaskSchedulingAlgorithm {
                     if task.inputs.len() == task.ready_inputs {
                         // Schedule task on k'th processor
 
-                        if dag.get_task(task_id).is_allowed_on(k) {
+                        // if dag.get_task(task_id).is_allowed_on(k) {
+                        if evaluate(dag, task_id, &system, k) {
                             result.push(Action::ScheduleTask {
                                 task: ptq_z.pop_front().unwrap(),
                                 resource: k,
                                 cores: task.max_cores,
                                 expected_span: None,
                             });
-
                         }
-                    } else {
-                        // Otherwise, check next ptq
-                        continue;
                     }
                 }
             }
