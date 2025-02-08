@@ -56,8 +56,8 @@ impl<T> QueueSet<T> {
         self.queues.get_mut(queue_index)?.get_mut(queue_sub_index)
     }
 
-    pub fn get_queue(&self, index: usize) -> Option<&VecDeque<T>> {
-        self.queues.get(index)
+    pub fn get_queue(&mut self, index: usize) -> Option<&mut VecDeque<T>> {
+        self.queues.get_mut(index)
     }
 }
 
@@ -72,6 +72,10 @@ pub struct DynamicTaskSchedulingAlgorithm {
 
     // This will contain the task_id's of
     // tasks that have already been completed
+
+    // NOTE: Instead of this, I can
+    // just go to the dag and check all
+    // tasks that are in the state 'Done'.
     completed_task_queue: Vec<usize>,
 }
 
@@ -85,16 +89,20 @@ impl DynamicTaskSchedulingAlgorithm {
         }
     }
 
-    pub fn initialize_ptqs(&mut self, system: &System) {
+    fn initialize_ptqs(&mut self, system: &System) {
         // self.processor_task_queues = QueueSet::new(system.resources.len());
         self.processor_task_queues.add_queues(system.resources.len());
     }
 
-    pub fn add_task_to_ctq(&mut self, task_id: usize) {
+    fn add_task_to_ctq(&mut self, task_id: usize) {
         self.completed_task_queue.push(task_id);
     }
-
+    // TODO: Fix these errors:
+    // [23.200 ERROR runner] Wrong action, resource 3 doesn't have enough cores
+    // [23.200 ERROR runner] DAG is not completed, currently 1 Pending, 1 Ready, 4 Done tasks
     fn schedule(&mut self, dag: &DAG, system: System, ctx: &SimulationContext) -> Vec<Action> {
+        let mut result = Vec::new();
+
         for (k, resource) in system.resources.iter().enumerate() {
             // Validate if the k'th processors is in
             // a running state. This will be determined
@@ -107,29 +115,66 @@ impl DynamicTaskSchedulingAlgorithm {
                 continue;
             }
 
-            let ptq_k = self.processor_task_queues.get_queue(k).unwrap();
+            let ptq_k: &mut VecDeque<usize> = self.processor_task_queues.get_queue(k).unwrap();
 
-            // Now, if the next task in ptq[k] has
+            if ptq_k.is_empty(){
+                // no need to proceed if no tasks
+                // are in this queue
+
+
+                // NOTE: This might have to be changed later to
+                // switch to a different ptq so that the cpu isnt
+                // left running idly.
+                continue;
+            }
+            // Now, if the next task in ptq_k has
             // its dependent tasks resolved, then we
             // execute it.
 
-            let mut task_id = ptq_k.get(0).unwrap();
+            let task_id = ptq_k.front().unwrap().clone();
+            let task = &dag.get_task(task_id);
+            // let mut required_data_items_ids = task.inputs;
+            
+            // println!("{:?}", required_data_items_ids);
 
-            let mut required_tasks_ids = &dag.get_task(*task_id).inputs;
-
-            if required_tasks_ids.is_empty() {
+            if task.inputs.is_empty() {
                 // If there are no input tasks
                 // then this is a starting task
                 // and it can be scheduled as is
+
+                if dag.get_task(task_id).is_allowed_on(k) {
+                    result.push(Action::ScheduleTask {
+                        task: ptq_k.pop_front().unwrap(),
+                        resource: k,
+                        cores: task.max_cores,
+                        expected_span: None,
+                    });
+
+                    self.completed_task_queue.push(task_id);
+                }
             } else {
                 // Otherwise, validate that all of the required
                 // task ids have been completed before executing.
-                let mut requirements_met = required_tasks_ids
-                    .iter()
-                    .all(|&id| self.completed_task_queue.contains(&id));
 
-                if requirements_met {
+                // let mut requirements_met = required_tasks_ids
+                //     .iter()
+                //     .all(|&id| self.completed_task_queue.contains(&id));
+
+
+
+                if task.inputs.len() == task.ready_inputs {
                     // Schedule the task into the k'th processor.
+
+                    if dag.get_task(task_id).is_allowed_on(k) {
+                        result.push(Action::ScheduleTask {
+                            task: ptq_k.pop_front().unwrap(),
+                            resource: k,
+                            cores: task.max_cores,
+                            expected_span: None,
+                        });
+
+                        self.completed_task_queue.push(task_id);
+                    }
                 } else {
                     // Otherwise, we navigate to the other
                     // ptqs and verify if they contain a task that
@@ -145,20 +190,50 @@ impl DynamicTaskSchedulingAlgorithm {
 
                         let ptq_z = self.processor_task_queues.get_queue(z).unwrap();
 
-                        task_id = ptq_z.get(0).unwrap();
+                        if ptq_z.is_empty(){
+                            // no need to proceed if no tasks are in
+                            // this queue
+                            continue;
+                        }
+                        let task_id = ptq_z.front().unwrap().clone();
 
-                        required_tasks_ids = &dag.get_task(*task_id).inputs;
 
-                        if required_tasks_ids.is_empty() {
+                        let task = &dag.get_task(task_id);
+
+                        // required_tasks_ids = &dag.get_task(task_id).inputs;
+
+                        if task.inputs.is_empty() {
                             // No requirements means that it is good to be
                             // executed
-                        } else {
-                            requirements_met = required_tasks_ids
-                                .iter()
-                                .all(|&id| self.completed_task_queue.contains(&id));
 
-                            if requirements_met {
+                            if dag.get_task(task_id).is_allowed_on(k) {
+                                result.push(Action::ScheduleTask {
+                                    task: ptq_z.pop_front().unwrap(),
+                                    resource: k,
+                                    cores: task.max_cores,
+                                    expected_span: None,
+                                });
+
+                                self.completed_task_queue.push(task_id);
+                            }
+                        } else {
+                            // requirements_met = required_tasks_ids
+                            //     .iter()
+                            //     .all(|&id| self.completed_task_queue.contains(&id));
+
+                            if task.inputs.len() == task.ready_inputs {
                                 // Schedule task on k'th processor
+
+                                if dag.get_task(task_id).is_allowed_on(k) {
+                                    result.push(Action::ScheduleTask {
+                                        task: ptq_z.pop_front().unwrap(),
+                                        resource: k,
+                                        cores: task.max_cores,
+                                        expected_span: None,
+                                    });
+
+                                    self.completed_task_queue.push(task_id);
+                                }
                             } else {
                                 // Otherwise, check next ptq
                                 continue;
@@ -168,8 +243,7 @@ impl DynamicTaskSchedulingAlgorithm {
                 }
             }
         }
-
-        Vec::new()
+        result
     }
 }
 
@@ -205,8 +279,13 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
                     // inner loop
                     break;
                 }
-                self.processor_task_queues
-                    .enqueue(i, dispatch_task_queue.pop().unwrap());
+                let task_id = dispatch_task_queue.last().unwrap();
+                // Verifying if the task is allowed on the processor
+                // before enqueuing it into its ptq
+                if dag.get_task(*task_id).is_allowed_on(i) {
+                    self.processor_task_queues
+                        .enqueue(i, dispatch_task_queue.pop().unwrap());
+                }
             }
         }
 
