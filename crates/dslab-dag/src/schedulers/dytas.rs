@@ -110,9 +110,6 @@ impl DynamicTaskSchedulingAlgorithm {
         self.processor_task_queues.add_queues(system.resources.len());
     }
 
-    // TODO: Fix these errors:
-    // [23.200 ERROR runner] Wrong action, resource 3 doesn't have enough cores
-    // [23.200 ERROR runner] DAG is not completed, currently 1 Pending, 1 Ready, 4 Done tasks
     fn schedule(&mut self, dag: &DAG, system: System, _ctx: &SimulationContext) -> Vec<Action> {
         let mut result = Vec::new();
 
@@ -144,27 +141,23 @@ impl DynamicTaskSchedulingAlgorithm {
             // Now, if the next task in ptq_k has
             // its dependent tasks resolved, then we
             // execute it.
-
             let task_id = ptq_k.front().unwrap().clone();
             let task = &dag.get_task(task_id);
 
-            // Validate that all of the required
+            // 1st: Validate that all of the required
             // task ids have been completed before executing.
-
-            if task.inputs.len() == task.ready_inputs {
+            // 2nd: If 1st passes, make sure the task is executable
+            // in the specified resource.
+            if task.state == TaskState::Ready && evaluate(dag, task_id, &system, k) {
                 // Schedule the task into the k'th processor,
                 // if it passes the requirements to be
                 // assigned.
-
-                // if dag.get_task(task_id).is_allowed_on(k) {
-                if evaluate(dag, task_id, &system, k) {
-                    result.push(Action::ScheduleTask {
-                        task: ptq_k.pop_front().unwrap(),
-                        resource: k,
-                        cores: task.max_cores,
-                        expected_span: None,
-                    });
-                }
+                result.push(Action::ScheduleTask {
+                    task: ptq_k.pop_front().unwrap(),
+                    resource: k,
+                    cores: task.max_cores,
+                    expected_span: None,
+                });
             } else {
                 // Otherwise, we navigate to the other
                 // ptqs and verify if they contain a task that
@@ -175,10 +168,18 @@ impl DynamicTaskSchedulingAlgorithm {
                 // into consideration their other queued tasks as well.
                 for z in 0..system.resources.len() {
                     if z == k {
+                        // NOTE: I dont think this if should be here since
+                        // it should also verify other tasks down the line
+                        // within the same processor task queue during this process.
+                        // based on what the pseudocode states.
                         continue; // Skip current ptq
                     }
 
                     let ptq_z = self.processor_task_queues.get_queue(z).unwrap();
+
+                    // for l in 0..ptq_z.len(){
+                        
+                    // }
 
                     if ptq_z.is_empty() {
                         // no need to proceed if no tasks are in
@@ -189,10 +190,8 @@ impl DynamicTaskSchedulingAlgorithm {
 
                     let task = &dag.get_task(task_id);
 
-                    if task.inputs.len() == task.ready_inputs {
+                    if task.state == TaskState::Ready {
                         // Schedule task on k'th processor
-
-                        // if dag.get_task(task_id).is_allowed_on(k) {
                         if evaluate(dag, task_id, &system, k) {
                             result.push(Action::ScheduleTask {
                                 task: ptq_z.pop_front().unwrap(),
@@ -217,42 +216,34 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
             "DynamicTaskSchedulingAlgorithm doesn't support DataTransferMode::Manual"
         );
 
-        // Initialize processor task queue for each resource,
-        // according to the
-        // number of resources available.
+        // Initialize processor task queue for each resource (processor),
+        // according to the number of resources available.
         self.initialize_ptqs(&system);
 
-        // Getting the tasks from the dag into the
-        // initial task queue
-        // let initial_task_queue = dag.get_tasks();
-
         // Sorting the tasks by dependency in the dispatch task queue.
-
-        // NOTE: Consider swapping for topsort in common.rs
-        // let mut dispatch_task_queue = topological_sort(&initial_task_queue).expect("Cycle detected in task dependencies");
         let mut dispatch_task_queue = topsort(dag);
         dispatch_task_queue.reverse(); // Reversing so that I can pop easily next in sorted order.
 
         // Distributing tasks into the processor_task_queues
-        while !dispatch_task_queue.is_empty() {
+        // while !dispatch_task_queue.is_empty() {
+        'outer: loop {
             for i in 0..system.resources.len() {
-                if dispatch_task_queue.is_empty() {
-                    // Just in case the dtq becomes empty during the
-                    // inner loop
-                    break;
-                }
-                let task_id = dispatch_task_queue.last().unwrap();
+                let Some(task_id) = dispatch_task_queue.last() else {
+                    // If dispatch task queue becomes empty: break out.
+                    break 'outer;
+                };
+
                 // Verifying if the task is allowed on the processor
                 // before enqueuing it into its ptq
-                if dag.get_task(*task_id).is_allowed_on(i) {
+                if evaluate(dag, *task_id, &system, i) {
                     self.processor_task_queues
-                        .enqueue(i, dispatch_task_queue.pop().unwrap());
+                        .enqueue(i, dispatch_task_queue.pop().unwrap()); // Pop to confirm removing from dtq
                 }
             }
         }
 
-        // The initialization phase is over. Now it is time
-        // for the dynamic scheduling part.
+        // The initialization phase is over.
+        // Now it is time for the dynamic scheduling part.
         self.schedule(dag, system, ctx)
     }
 
