@@ -1,3 +1,4 @@
+use crate::schedulers::common::task_successors;
 use crate::dag::DAG;
 use crate::data_item::DataTransferMode;
 use crate::runner::Config;
@@ -76,6 +77,57 @@ pub fn evaluate(dag: &DAG, task_id: usize, system: &System, resource: usize) -> 
     }
     true
 }
+
+/// Based on Kahn’s Algorithm on topological sorting.
+pub fn topological_sort(dag: &DAG) -> Vec<usize> {
+    let mut in_degree = vec![0; dag.get_tasks().len()];
+    let mut sorted_tasks = Vec::new();
+    let mut queue = VecDeque::new();
+
+    // Compute in-degree (number of dependencies) for each task
+    for task_id in 0..dag.get_tasks().len() {
+        let predecessors = task_predecessors(task_id, dag);
+        in_degree[task_id] = predecessors.len();
+    }
+
+    // Find tasks with no dependencies (in-degree = 0)
+    for (task_id, &degree) in in_degree.iter().enumerate() {
+        if degree == 0 {
+            queue.push_back(task_id);
+        }
+    }
+
+    // Process tasks in topological order
+    while let Some(task_id) = queue.pop_front() {
+        sorted_tasks.push(task_id);
+
+        for (successor_id, _) in task_successors(task_id, dag) {
+            in_degree[successor_id] -= 1;
+
+            // If a task has no remaining dependencies, add it to the queue
+            if in_degree[successor_id] == 0 {
+                queue.push_back(successor_id);
+            }
+        }
+    }
+
+    // Ensure the DAG has no cycles
+    if sorted_tasks.len() != dag.get_tasks().len() {
+        panic!("Cycle detected in the DAG!");
+    }
+
+    sorted_tasks
+}
+
+pub fn task_predecessors(v: usize, dag: &DAG) -> Vec<(usize, f64)> {
+    let mut result = Vec::new();
+    for &data_item_id in dag.get_task(v).inputs.iter() {
+        let data_item = dag.get_data_item(data_item_id);
+        result.push((data_item.producer.unwrap(), data_item.size));
+    }
+    result
+}
+
 
 pub struct DynamicTaskSchedulingAlgorithm {
     // ptq will be used to keep track of the dag task_id's
@@ -178,7 +230,7 @@ impl DynamicTaskSchedulingAlgorithm {
                     let ptq_z = self.processor_task_queues.get_queue(z).unwrap();
 
                     // for l in 0..ptq_z.len(){
-                        
+
                     // }
 
                     if ptq_z.is_empty() {
@@ -221,11 +273,17 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
         self.initialize_ptqs(&system);
 
         // Sorting the tasks by dependency in the dispatch task queue.
-        let mut dispatch_task_queue = topsort(dag);
-        dispatch_task_queue.reverse(); // Reversing so that I can pop easily next in sorted order.
+        // NOTE: Verify if changing the sorting methodology affects performance.
+        // let mut dispatch_task_queue = topsort(dag);
+        // dispatch_task_queue.reverse(); // Reversing so that I can pop easily next in sorted order.
+
+
+        // NOTE: This sorting methodology achieves better makespan results than
+        // the one above.
+        let mut dispatch_task_queue = topological_sort(dag);
+        dispatch_task_queue.reverse();
 
         // Distributing tasks into the processor_task_queues
-        // while !dispatch_task_queue.is_empty() {
         'outer: loop {
             for i in 0..system.resources.len() {
                 let Some(task_id) = dispatch_task_queue.last() else {
