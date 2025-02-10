@@ -1,8 +1,8 @@
-use crate::schedulers::common::task_successors;
 use crate::dag::DAG;
 use crate::data_item::DataTransferMode;
 use crate::runner::Config;
 use crate::scheduler::{Action, Scheduler};
+use crate::schedulers::common::task_successors;
 use crate::schedulers::common::topsort;
 use crate::system::System;
 use crate::task::TaskState;
@@ -128,7 +128,6 @@ pub fn task_predecessors(v: usize, dag: &DAG) -> Vec<(usize, f64)> {
     result
 }
 
-
 pub struct DynamicTaskSchedulingAlgorithm {
     // ptq will be used to keep track of the dag task_id's
     // that are to be executed on each system resource
@@ -179,35 +178,34 @@ impl DynamicTaskSchedulingAlgorithm {
 
             let ptq_k: &mut VecDeque<usize> = self.processor_task_queues.get_queue(k).unwrap();
 
-            if ptq_k.is_empty() {
-                // no need to proceed if no tasks
-                // are in this queue
-
-                // NOTE: This might have to be changed later to
-                // switch to a different ptq so that the cpu isnt
-                // left running idly. There is no mention of this in the
-                // paper of the DYTAS model though.
-                continue;
-            }
+            // Page 26 says that:
+            // "If any PTQ completes its Task set at the earliest, migrate the suitable task from the available PTQ‟s."
+            // This means I might have to include a migration of tasks
+            // here from tasks in other's PTQs that have yet to be scheduled.
+            // thus, likely not a continue, but the else statement below.
 
             // Now, if the next task in ptq_k has
             // its dependent tasks resolved, then we
             // execute it.
-            let task_id = ptq_k.front().unwrap().clone();
-            let task = &dag.get_task(task_id);
+            // let task_id = ptq_k.front().unwrap().clone();
 
-            // 1st: Validate that all of the required
+            // 1st: Validate that ptq is not empty.
+            // 2nd: Validate that all of the required
             // task ids have been completed before executing.
-            // 2nd: If 1st passes, make sure the task is executable
+            // 3rd: Make sure the task is executable
             // in the specified resource.
-            if task.state == TaskState::Ready && evaluate(dag, task_id, &system, k) {
+            if ptq_k.front() != None
+                && dag.get_task(ptq_k.front().unwrap().clone()).state == TaskState::Ready
+                && evaluate(dag, ptq_k.front().unwrap().clone(), &system, k)
+            {
+                let task = &dag.get_task(ptq_k.front().unwrap().clone());
                 // Schedule the task into the k'th processor,
                 // if it passes the requirements to be
                 // assigned.
                 result.push(Action::ScheduleTask {
                     task: ptq_k.pop_front().unwrap(),
                     resource: k,
-                    cores: task.max_cores,
+                    cores: task.max_cores, // TODO: Might have to determine cores based on task's min-max cores and resource cores.
                     expected_span: None,
                 });
             } else {
@@ -229,10 +227,6 @@ impl DynamicTaskSchedulingAlgorithm {
 
                     let ptq_z = self.processor_task_queues.get_queue(z).unwrap();
 
-                    // for l in 0..ptq_z.len(){
-
-                    // }
-
                     if ptq_z.is_empty() {
                         // no need to proceed if no tasks are in
                         // this queue
@@ -242,16 +236,15 @@ impl DynamicTaskSchedulingAlgorithm {
 
                     let task = &dag.get_task(task_id);
 
-                    if task.state == TaskState::Ready {
+                    if task.state == TaskState::Ready && evaluate(dag, task_id, &system, k) {
                         // Schedule task on k'th processor
-                        if evaluate(dag, task_id, &system, k) {
-                            result.push(Action::ScheduleTask {
-                                task: ptq_z.pop_front().unwrap(),
-                                resource: k,
-                                cores: task.max_cores,
-                                expected_span: None,
-                            });
-                        }
+                        result.push(Action::ScheduleTask {
+                            task: ptq_z.pop_front().unwrap(),
+                            resource: k,
+                            cores: task.max_cores,
+                            expected_span: None,
+                        });
+                        break; // Removing this break alone increases the makespan. Please leave it. It also alings with the paper's implementation.
                     }
                 }
             }
@@ -276,7 +269,6 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
         // NOTE: Verify if changing the sorting methodology affects performance.
         // let mut dispatch_task_queue = topsort(dag);
         // dispatch_task_queue.reverse(); // Reversing so that I can pop easily next in sorted order.
-
 
         // NOTE: This sorting methodology achieves better makespan results than
         // the one above.
