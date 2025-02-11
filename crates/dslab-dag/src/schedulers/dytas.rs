@@ -133,18 +133,6 @@ pub struct DynamicTaskSchedulingAlgorithm {
     // that are to be executed on each system resource
     // (assuming each "system" is a processor).
     processor_task_queues: QueueSet<usize>,
-    // This will contain the task_id's of
-    // tasks that have already been completed
-
-    // Given that i can validate if all
-    // task dependencies are met using
-    // the tasks state, I woulnd't need
-    // a list of completed tasks here.
-    // This can be done with task.inputs.len() == task.ready_inputs.
-    // This can also be done veryfing if task is in Ready state, as
-    // if it is still Pending it means that its dependencies
-    // have not been resolved yet.
-    // completed_task_queue: Vec<usize>,
 }
 
 impl DynamicTaskSchedulingAlgorithm {
@@ -169,14 +157,12 @@ impl DynamicTaskSchedulingAlgorithm {
             // a running state. This will be determined
             // by validateing the number of available cores.
 
-            if resource.cores_available < resource.cores {
+            if resource.cores_available != resource.cores {
                 // This will be taken to indicate that
                 // the resource is in running state,
                 // thus we'll skip to the next processor
                 continue;
             }
-
-            let ptq_k: &mut VecDeque<usize> = self.processor_task_queues.get_queue(k).unwrap();
 
             // Page 26 says that:
             // "If any PTQ completes its Task set at the earliest, migrate the suitable task from the available PTQ‟s."
@@ -187,25 +173,32 @@ impl DynamicTaskSchedulingAlgorithm {
             // Now, if the next task in ptq_k has
             // its dependent tasks resolved, then we
             // execute it.
-            // let task_id = ptq_k.front().unwrap().clone();
+
+            let mut task_id = self.processor_task_queues.get_element_mut(k, 0);
 
             // 1st: Validate that ptq is not empty.
             // 2nd: Validate that all of the required
             // task ids have been completed before executing.
             // 3rd: Make sure the task is executable
             // in the specified resource.
-            if ptq_k.front() != None
-                && dag.get_task(ptq_k.front().unwrap().clone()).state == TaskState::Ready
-                && evaluate(dag, ptq_k.front().unwrap().clone(), &system, k)
+            if task_id != None
+                && dag.get_task(**task_id.as_ref().unwrap()).state == TaskState::Ready
+                && evaluate(dag, **task_id.as_ref().unwrap(), &system, k)
             {
-                let task = &dag.get_task(ptq_k.front().unwrap().clone());
+                let task = &dag.get_task(**task_id.as_ref().unwrap()).clone();
+                let cores_to_assign = if task.max_cores > resource.cores {
+                    resource.cores
+                } else {
+                    task.max_cores
+                };
+
                 // Schedule the task into the k'th processor,
                 // if it passes the requirements to be
                 // assigned.
                 result.push(Action::ScheduleTask {
-                    task: ptq_k.pop_front().unwrap(),
+                    task: self.processor_task_queues.dequeue(k).unwrap(),
                     resource: k,
-                    cores: task.max_cores, // TODO: Might have to determine cores based on task's min-max cores and resource cores.
+                    cores: cores_to_assign, // TODO: Might have to determine cores based on task's min-max cores and resource cores.
                     expected_span: None,
                 });
             } else {
@@ -216,32 +209,29 @@ impl DynamicTaskSchedulingAlgorithm {
                 // NOTE: I'm only validating the front task in each queue,
                 // but I might have to change it so that it takes
                 // into consideration their other queued tasks as well.
-                for z in 0..system.resources.len() {
-                    if z == k {
-                        // NOTE: I dont think this if should be here since
-                        // it should also verify other tasks down the line
-                        // within the same processor task queue during this process.
-                        // based on what the pseudocode states.
-                        continue; // Skip current ptq
-                    }
 
-                    let ptq_z = self.processor_task_queues.get_queue(z).unwrap();
+                // NOTE: I'm skipping the k'th resource since we have
+                // to skip the current processor's ptq for if we're entering
+                // this case.
+                for z in (0..system.resources.len()).filter(|&x| x != k) {
+                    task_id = self.processor_task_queues.get_element_mut(z, 0);
 
-                    if ptq_z.is_empty() {
-                        // no need to proceed if no tasks are in
-                        // this queue
-                        continue;
-                    }
-                    let task_id = ptq_z.front().unwrap().clone();
+                    if task_id != None
+                        && dag.get_task(**task_id.as_ref().unwrap()).state == TaskState::Ready
+                        && evaluate(dag, **task_id.as_ref().unwrap(), &system, k)
+                    {
+                        let task = &dag.get_task(**task_id.as_ref().unwrap());
+                        let cores_to_assign = if task.max_cores > resource.cores {
+                            resource.cores
+                        } else {
+                            task.max_cores
+                        };
 
-                    let task = &dag.get_task(task_id);
-
-                    if task.state == TaskState::Ready && evaluate(dag, task_id, &system, k) {
                         // Schedule task on k'th processor
                         result.push(Action::ScheduleTask {
-                            task: ptq_z.pop_front().unwrap(),
+                            task: self.processor_task_queues.dequeue(z).unwrap(),
                             resource: k,
-                            cores: task.max_cores,
+                            cores: cores_to_assign,
                             expected_span: None,
                         });
                         break; // Removing this break alone increases the makespan. Please leave it. It also alings with the paper's implementation.
