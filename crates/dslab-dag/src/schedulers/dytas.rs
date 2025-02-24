@@ -57,6 +57,24 @@ impl<T> QueueSet<T> {
         self.queues.get_mut(queue_index)?.get_mut(queue_sub_index)
     }
 
+    pub fn remove_element(&mut self, queue_index: usize, queue_sub_index: usize) -> Option<T> {
+        self.queues.get_mut(queue_index)?.remove(queue_sub_index)
+    }
+
+    // pub fn get_longest_queue_length(&mut self) -> usize {
+    //     let mut max_length = 0;
+    //     for i in 0..self.queues.len() {
+    //         if self.queues[i].len() > max_length {
+    //             max_length = self.queues[i].len();
+    //         }
+    //     }
+    //     max_length
+    // }
+
+    pub fn queue_len(&mut self, queue_index: usize) -> usize {
+        self.queues[queue_index].len()
+    }
+
     // pub fn get_queue(&mut self, index: usize) -> Option<&mut VecDeque<T>> {
     //     self.queues.get_mut(index)
     // }
@@ -164,41 +182,47 @@ impl DynamicTaskSchedulingAlgorithm {
                 continue;
             }
 
-            for i in 0..system.resources.len() {
+            // This loop accesses the ptq_k, but if the task is not
+            // ready for execution, the loop navigates through ptq_k+1 and so on
+            // to get a suitable task.
+            'outer: for i in 0..system.resources.len() {
                 // Queue index should go from k..n and then from 0..k
                 let queue_index = (i + k) % system.resources.len();
 
-                // First loop accesses the ptq_k, but if the task is not
-                // ready for execution, the loop navigates through ptq_k+1 and so on
-                // to get a suitable task.
-                let task_id = self.processor_task_queues.get_element_mut(queue_index, 0);
+                // This loop is to navigate all elements in the current PTQ
+                for queue_sub_index in 0..self.processor_task_queues.queue_len(queue_index) {
+                    let task_id = self.processor_task_queues.get_element_mut(queue_index, queue_sub_index);
 
-                // 1st: Validate that ptq is not empty.
-                // 2nd: Validate that all of the required
-                // task ids have been completed before executing.
-                // 3rd: Make sure the task is executable
-                // in the specified resource.
-                if task_id != None
-                    && dag.get_task(**task_id.as_ref().unwrap()).state == TaskState::Ready
-                    && evaluate(dag, **task_id.as_ref().unwrap(), &system, k)
-                {
-                    let task = &dag.get_task(**task_id.as_ref().unwrap());
-                    let cores_to_assign = if task.max_cores > resource.cores {
-                        resource.cores
-                    } else {
-                        task.max_cores
-                    };
+                    // 1st: Validate that ptq is not empty.
+                    // 2nd: Validate that all of the required
+                    // task ids have been completed before executing.
+                    // 3rd: Make sure the task is executable
+                    // in the specified resource.
+                    if task_id != None
+                        && dag.get_task(**task_id.as_ref().unwrap()).state == TaskState::Ready
+                        && evaluate(dag, **task_id.as_ref().unwrap(), &system, k)
+                    {
+                        let task = &dag.get_task(**task_id.as_ref().unwrap());
+                        let cores_to_assign = if task.max_cores > resource.cores {
+                            resource.cores
+                        } else {
+                            task.max_cores
+                        };
 
-                    // Schedule the task into the k'th processor,
-                    // if it passes the requirements to be
-                    // assigned.
-                    result.push(Action::ScheduleTask {
-                        task: self.processor_task_queues.dequeue(queue_index).unwrap(),
-                        resource: k,
-                        cores: cores_to_assign,
-                        expected_span: None,
-                    });
-                    break; // Breaking loop to go to the next processor
+                        // Schedule the task into the k'th processor,
+                        // if it passes the requirements to be
+                        // assigned.
+                        result.push(Action::ScheduleTask {
+                            task: self
+                                .processor_task_queues
+                                .remove_element(queue_index, queue_sub_index)
+                                .unwrap(),
+                            resource: k,
+                            cores: cores_to_assign,
+                            expected_span: None,
+                        });
+                        break 'outer; // Breaking loop to go to the next processor
+                    }
                 }
             }
         }
@@ -230,7 +254,7 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
 
         // dispatch_task_queue = vec![25, 0, 18, 7, 6, 3, 2, 1, 13, 5, 9, 15, 4, 16, 11, 8, 14, 19, 12, 10, 22, 20, 17, 23, 21, 24, 26];
         // dispatch_task_queue.reverse();
-        // Distributing tasks into the processor_task_queues
+        // Distributing tasks into the processor_task_queues in round robin fashion.
         'outer: loop {
             for i in 0..system.resources.len() {
                 let Some(task_id) = dispatch_task_queue.last() else {
