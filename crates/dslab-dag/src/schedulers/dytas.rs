@@ -57,9 +57,9 @@ impl<T> QueueSet<T> {
         self.queues.get_mut(queue_index)?.get_mut(queue_sub_index)
     }
 
-    pub fn get_queue(&mut self, index: usize) -> Option<&mut VecDeque<T>> {
-        self.queues.get_mut(index)
-    }
+    // pub fn get_queue(&mut self, index: usize) -> Option<&mut VecDeque<T>> {
+    //     self.queues.get_mut(index)
+    // }
 }
 
 /// Validates that the task is able to be executed in the specified resource.
@@ -265,6 +265,8 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
         let mut dispatch_task_queue = topological_sort(dag);
         dispatch_task_queue.reverse();
 
+        // dispatch_task_queue = vec![25, 0, 18, 7, 6, 3, 2, 1, 13, 5, 9, 15, 4, 16, 11, 8, 14, 19, 12, 10, 22, 20, 17, 23, 21, 24, 26];
+        // dispatch_task_queue.reverse();
         // Distributing tasks into the processor_task_queues
         'outer: loop {
             for i in 0..system.resources.len() {
