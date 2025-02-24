@@ -213,14 +213,21 @@ impl DynamicTaskSchedulingAlgorithm {
                 // NOTE: I'm skipping the k'th resource since we have
                 // to skip the current processor's ptq for if we're entering
                 // this case.
-                for z in (0..system.resources.len()).filter(|&x| x != k) {
-                    task_id = self.processor_task_queues.get_element_mut(z, 0);
+                for z in 0..system.resources.len() {
+                    let queue_index = (z + k) % system.resources.len();
+
+                    if queue_index == k {
+                        // Skip ptq that was already verified.
+                        continue;
+                    }
+
+                    task_id = self.processor_task_queues.get_element_mut(queue_index, 0);
 
                     if task_id != None
                         && dag.get_task(**task_id.as_ref().unwrap()).state == TaskState::Ready
                         && evaluate(dag, **task_id.as_ref().unwrap(), &system, k)
                     {
-                        let task = &dag.get_task(**task_id.as_ref().unwrap());
+                        let task = &dag.get_task(**task_id.as_ref().unwrap()).clone();
                         let cores_to_assign = if task.max_cores > resource.cores {
                             resource.cores
                         } else {
@@ -229,7 +236,7 @@ impl DynamicTaskSchedulingAlgorithm {
 
                         // Schedule task on k'th processor
                         result.push(Action::ScheduleTask {
-                            task: self.processor_task_queues.dequeue(z).unwrap(),
+                            task: self.processor_task_queues.dequeue(queue_index).unwrap(),
                             resource: k,
                             cores: cores_to_assign,
                             expected_span: None,
