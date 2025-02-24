@@ -164,78 +164,41 @@ impl DynamicTaskSchedulingAlgorithm {
                 continue;
             }
 
-            // Page 26 says that:
-            // "If any PTQ completes its Task set at the earliest, migrate the suitable task from the available PTQ‟s."
-            // This means I might have to include a migration of tasks
-            // here from tasks in other's PTQs that have yet to be scheduled.
-            // thus, likely not a continue, but the else statement below.
+            for i in 0..system.resources.len() {
+                // Queue index should go from k..n and then from 0..k
+                let queue_index = (i + k) % system.resources.len();
 
-            // Now, if the next task in ptq_k has
-            // its dependent tasks resolved, then we
-            // execute it.
+                // First loop accesses the ptq_k, but if the task is not
+                // ready for execution, the loop navigates through ptq_k+1 and so on
+                // to get a suitable task.
+                let task_id = self.processor_task_queues.get_element_mut(queue_index, 0);
 
-            let mut task_id = self.processor_task_queues.get_element_mut(k, 0);
+                // 1st: Validate that ptq is not empty.
+                // 2nd: Validate that all of the required
+                // task ids have been completed before executing.
+                // 3rd: Make sure the task is executable
+                // in the specified resource.
+                if task_id != None
+                    && dag.get_task(**task_id.as_ref().unwrap()).state == TaskState::Ready
+                    && evaluate(dag, **task_id.as_ref().unwrap(), &system, k)
+                {
+                    let task = &dag.get_task(**task_id.as_ref().unwrap());
+                    let cores_to_assign = if task.max_cores > resource.cores {
+                        resource.cores
+                    } else {
+                        task.max_cores
+                    };
 
-            // 1st: Validate that ptq is not empty.
-            // 2nd: Validate that all of the required
-            // task ids have been completed before executing.
-            // 3rd: Make sure the task is executable
-            // in the specified resource.
-            if task_id != None
-                && dag.get_task(**task_id.as_ref().unwrap()).state == TaskState::Ready
-                && evaluate(dag, **task_id.as_ref().unwrap(), &system, k)
-            {
-                let task = &dag.get_task(**task_id.as_ref().unwrap()).clone();
-                let cores_to_assign = if task.max_cores > resource.cores {
-                    resource.cores
-                } else {
-                    task.max_cores
-                };
-
-                // Schedule the task into the k'th processor,
-                // if it passes the requirements to be
-                // assigned.
-                result.push(Action::ScheduleTask {
-                    task: self.processor_task_queues.dequeue(k).unwrap(),
-                    resource: k,
-                    cores: cores_to_assign, // TODO: Might have to determine cores based on task's min-max cores and resource cores.
-                    expected_span: None,
-                });
-            } else {
-                // Otherwise, we navigate to the other
-                // ptqs and verify if they contain a task that
-                // meet the criteria.
-
-                // NOTE: I'm only validating the front task in each queue,
-                // but I might have to change it so that it takes
-                // into consideration their other queued tasks as well.
-
-                // NOTE: I'm skipping the k'th resource since we have
-                // to skip the current processor's ptq for if we're entering
-                // this case.
-                for z in (0..system.resources.len()).filter(|&x| x != k) {
-                    task_id = self.processor_task_queues.get_element_mut(z, 0);
-
-                    if task_id != None
-                        && dag.get_task(**task_id.as_ref().unwrap()).state == TaskState::Ready
-                        && evaluate(dag, **task_id.as_ref().unwrap(), &system, k)
-                    {
-                        let task = &dag.get_task(**task_id.as_ref().unwrap());
-                        let cores_to_assign = if task.max_cores > resource.cores {
-                            resource.cores
-                        } else {
-                            task.max_cores
-                        };
-
-                        // Schedule task on k'th processor
-                        result.push(Action::ScheduleTask {
-                            task: self.processor_task_queues.dequeue(z).unwrap(),
-                            resource: k,
-                            cores: cores_to_assign,
-                            expected_span: None,
-                        });
-                        break; // Removing this break alone increases the makespan. Please leave it. It also alings with the paper's implementation.
-                    }
+                    // Schedule the task into the k'th processor,
+                    // if it passes the requirements to be
+                    // assigned.
+                    result.push(Action::ScheduleTask {
+                        task: self.processor_task_queues.dequeue(queue_index).unwrap(),
+                        resource: k,
+                        cores: cores_to_assign,
+                        expected_span: None,
+                    });
+                    break; // Breaking loop to go to the next processor
                 }
             }
         }
