@@ -107,24 +107,32 @@ pub enum PTQNavigationCriterion {
     Whole, // Validate all tasks of current processor's task queue (PTQ_k[0...n]) before verifying the next processor's task queue (PTQ_{k+1}[0...n])
     Front, // Only validates the task in the front of the current processor's task queue (PTQ_k[0]) before verifying the next processor's task queue (PTQ_{k+1}[0])
 }
+#[derive(Clone, Debug, PartialEq, Display, EnumIter, EnumString)]
+pub enum TaskSortingCriterion {
+    Khan, // Khan's topological sorting algorithm
+    DFS // Depth First Search topological sort implemented in dslab
+}
 
 #[derive(Clone, Debug)]
 pub struct Strategy {
     pub ptq_navigation_criterion: PTQNavigationCriterion,
+    pub task_sorting_criterion: TaskSortingCriterion
 }
 
 impl Strategy {
     pub fn from_params(params: &SchedulerParams) -> Self {
         let ptq_navigation_criterion_str: String = params.get("navigation").unwrap();
+        let task_sorting_criterion_str: String = params.get("sorting").unwrap();
         Self {
             ptq_navigation_criterion: PTQNavigationCriterion::from_str(&ptq_navigation_criterion_str)
                 .expect("Wrong criterion: {ptq_navigation_criterion_str}"),
+            task_sorting_criterion: TaskSortingCriterion::from_str(&task_sorting_criterion_str).expect("Wrong criterion: {task_sorting_criterion_str}")
         }
     }
 }
 
 /// Based on Kahn’s Algorithm on topological sorting.
-pub fn topological_sort(dag: &DAG) -> Vec<usize> {
+pub fn khan_topological_sort(dag: &DAG) -> Vec<usize> {
     let mut in_degree = vec![0; dag.get_tasks().len()];
     let mut sorted_tasks = Vec::new();
     let mut queue = VecDeque::new();
@@ -222,13 +230,14 @@ impl DynamicTaskSchedulingAlgorithm {
                 // Queue index should go from k..n and then from 0..k
                 let queue_index = (i + k) % system.resources.len();
 
-                let n_queue_sub_index_navigation = if self.strategy.ptq_navigation_criterion == PTQNavigationCriterion::Whole {
-                    self.processor_task_queues.queue_len(queue_index) // navigates all elements in PTQ_{queue_index}
-                } else if self.strategy.ptq_navigation_criterion == PTQNavigationCriterion::Front {
-                    1 // Only use front element in PTQ_{queue_index} before checking the next PTQ
-                } else {
-                    1
-                };
+                let n_queue_sub_index_navigation =
+                    if self.strategy.ptq_navigation_criterion == PTQNavigationCriterion::Whole {
+                        self.processor_task_queues.queue_len(queue_index) // navigates all elements in PTQ_{queue_index}
+                    } else if self.strategy.ptq_navigation_criterion == PTQNavigationCriterion::Front {
+                        1 // Only use front element in PTQ_{queue_index} before checking the next PTQ
+                    } else {
+                        1
+                    };
                 for queue_sub_index in 0..n_queue_sub_index_navigation {
                     let task_id = self.processor_task_queues.get_element_mut(queue_index, queue_sub_index);
 
@@ -291,11 +300,21 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
 
         // NOTE: This sorting methodology achieves better makespan results than
         // the one above.
-        let mut dispatch_task_queue = topological_sort(dag);
-        dispatch_task_queue.reverse();
+        // let mut dispatch_task_queue = khan_topological_sort(dag);
+        // dispatch_task_queue.reverse();
+
+        let mut dispatch_task_queue = if self.strategy.task_sorting_criterion == TaskSortingCriterion::DFS {
+            topsort(dag)
+        } else if self.strategy.task_sorting_criterion == TaskSortingCriterion::Khan {
+            khan_topological_sort(dag)
+        } else {
+            khan_topological_sort(dag)
+        };
 
         // dispatch_task_queue = vec![25, 0, 18, 7, 6, 3, 2, 1, 13, 5, 9, 15, 4, 16, 11, 8, 14, 19, 12, 10, 22, 20, 17, 23, 21, 24, 26];
         // dispatch_task_queue.reverse();
+
+        dispatch_task_queue.reverse();
         // Distributing tasks into the processor_task_queues in round robin fashion.
         'outer: loop {
             for i in 0..system.resources.len() {
