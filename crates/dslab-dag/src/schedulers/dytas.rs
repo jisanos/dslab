@@ -237,7 +237,6 @@ impl DynamicTaskSchedulingAlgorithm {
                     // task ids have been completed before executing.
                     // 3rd: Make sure the task is executable
                     // in the specified resource.
->>>>>>> refactor-dytas
                     if task_id != None
                         && dag.get_task(**task_id.as_ref().unwrap()).state == TaskState::Ready
                         && evaluate(dag, **task_id.as_ref().unwrap(), &system, k)
@@ -246,7 +245,6 @@ impl DynamicTaskSchedulingAlgorithm {
 
                         // NOTE: Cores management isn't discussed for DYTAS... So i implemented
                         // a very basic assignment of cores here.
->>>>>>> refactor-dytas
                         let cores_to_assign = if task.max_cores > resource.cores {
                             resource.cores
                         } else {
@@ -261,7 +259,6 @@ impl DynamicTaskSchedulingAlgorithm {
                                 .processor_task_queues
                                 .remove_element(queue_index, queue_sub_index)
                                 .unwrap(),
->>>>>>> refactor-dytas
                             resource: k,
                             cores: cores_to_assign,
                             expected_span: None,
