@@ -164,7 +164,7 @@ impl std::fmt::Display for SchedulerParams {
 pub fn default_scheduler_resolver(params: &SchedulerParams) -> Option<RcScheduler> {
     match params.name.as_str() {
         "Simple" => Some(Rc::new(RefCell::new(SimpleScheduler::new()))),
-        "DYTAS" => Some(Rc::new(RefCell::new(DynamicTaskSchedulingAlgorithm::new()))),
+        "DYTAS" => Some(Rc::new(RefCell::new(DynamicTaskSchedulingAlgorithm::from_params(params)))),
         "DynamicList" => Some(Rc::new(RefCell::new(DynamicListScheduler::from_params(params)))),
         "HEFT" => Some(Rc::new(RefCell::new(HeftScheduler::from_params(params)))),
         "Lookahead" => Some(Rc::new(RefCell::new(LookaheadScheduler::from_params(params)))),

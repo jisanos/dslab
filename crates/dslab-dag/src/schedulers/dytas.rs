@@ -1,6 +1,7 @@
 use crate::dag::DAG;
 use crate::data_item::DataTransferMode;
 use crate::runner::Config;
+use crate::scheduler::SchedulerParams;
 use crate::scheduler::{Action, Scheduler};
 use crate::schedulers::common::task_successors;
 use crate::schedulers::common::topsort;
@@ -8,6 +9,10 @@ use crate::system::System;
 use crate::task::TaskState;
 use simcore::context::SimulationContext;
 use std::collections::VecDeque;
+use std::str::FromStr;
+use strum_macros::Display;
+use strum_macros::EnumIter;
+use strum_macros::EnumString;
 
 struct QueueSet<T> {
     /// This will contain the processor task queue of each
@@ -46,15 +51,34 @@ impl<T> QueueSet<T> {
 
     /// Dequeues the next task from the specified processor's task queue.
     /// The queue_index specifies which processor the queue belongs to.
-    pub fn dequeue(&mut self, queue_index: usize) -> Option<T> {
-        self.queues.get_mut(queue_index).and_then(|q| q.pop_front())
-    }
+    // pub fn dequeue(&mut self, queue_index: usize) -> Option<T> {
+    //     self.queues.get_mut(queue_index).and_then(|q| q.pop_front())
+    // }
 
     /// This will just return, but not remove, the task id of the specified index.
     /// The queue_index specifies which processor the queue belongs to.
     /// The queue_sub_index is the index within the specified queue to inspect.
     pub fn get_element_mut(&mut self, queue_index: usize, queue_sub_index: usize) -> Option<&mut T> {
         self.queues.get_mut(queue_index)?.get_mut(queue_sub_index)
+    }
+
+    /// Returns and removes element from queue in specified subindex.
+    pub fn remove_element(&mut self, queue_index: usize, queue_sub_index: usize) -> Option<T> {
+        self.queues.get_mut(queue_index)?.remove(queue_sub_index)
+    }
+
+    // pub fn get_longest_queue_length(&mut self) -> usize {
+    //     let mut max_length = 0;
+    //     for i in 0..self.queues.len() {
+    //         if self.queues[i].len() > max_length {
+    //             max_length = self.queues[i].len();
+    //         }
+    //     }
+    //     max_length
+    // }
+
+    pub fn queue_len(&mut self, queue_index: usize) -> usize {
+        self.queues[queue_index].len()
     }
 
     // pub fn get_queue(&mut self, index: usize) -> Option<&mut VecDeque<T>> {
@@ -76,6 +100,27 @@ pub fn evaluate(dag: &DAG, task_id: usize, system: &System, resource: usize) -> 
         return false;
     }
     true
+}
+
+#[derive(Clone, Debug, PartialEq, Display, EnumIter, EnumString)]
+pub enum PTQNavigationCriterion {
+    Whole, // Validate all tasks of current processor's task queue (PTQ_k[0...n]) before verifying the next processor's task queue (PTQ_{k+1}[0...n])
+    Front, // Only validates the task in the front of the current processor's task queue (PTQ_k[0]) before verifying the next processor's task queue (PTQ_{k+1}[0])
+}
+
+#[derive(Clone, Debug)]
+pub struct Strategy {
+    pub ptq_navigation_criterion: PTQNavigationCriterion,
+}
+
+impl Strategy {
+    pub fn from_params(params: &SchedulerParams) -> Self {
+        let ptq_navigation_criterion_str: String = params.get("navigation").unwrap();
+        Self {
+            ptq_navigation_criterion: PTQNavigationCriterion::from_str(&ptq_navigation_criterion_str)
+                .expect("Wrong criterion: {ptq_navigation_criterion_str}"),
+        }
+    }
 }
 
 /// Based on Kahn’s Algorithm on topological sorting.
@@ -133,15 +178,21 @@ pub struct DynamicTaskSchedulingAlgorithm {
     // that are to be executed on each system resource
     // (assuming each "system" is a processor).
     processor_task_queues: QueueSet<usize>,
+    pub strategy: Strategy,
 }
 
 impl DynamicTaskSchedulingAlgorithm {
-    pub fn new() -> Self {
+    pub fn new(strategy: Strategy) -> Self {
         DynamicTaskSchedulingAlgorithm {
             // There are no ptqs when initializing the algorithm
             // but it will expands once it starts.
             processor_task_queues: QueueSet::new(0),
+            strategy,
         }
+    }
+
+    pub fn from_params(params: &SchedulerParams) -> Self {
+        Self::new(Strategy::from_params(params))
     }
 
     fn initialize_ptqs(&mut self, system: &System) {
@@ -164,84 +215,58 @@ impl DynamicTaskSchedulingAlgorithm {
                 continue;
             }
 
-            // Page 26 says that:
-            // "If any PTQ completes its Task set at the earliest, migrate the suitable task from the available PTQ‟s."
-            // This means I might have to include a migration of tasks
-            // here from tasks in other's PTQs that have yet to be scheduled.
-            // thus, likely not a continue, but the else statement below.
+            // This loop accesses the ptq_k, but if no tasks in it are
+            // ready for execution, the loop navigates through PTQ_{k+1} and so on
+            // to get a suitable task.
+            'outer: for i in 0..system.resources.len() {
+                // Queue index should go from k..n and then from 0..k
+                let queue_index = (i + k) % system.resources.len();
 
-            // Now, if the next task in ptq_k has
-            // its dependent tasks resolved, then we
-            // execute it.
-
-            let mut task_id = self.processor_task_queues.get_element_mut(k, 0);
-
-            // 1st: Validate that ptq is not empty.
-            // 2nd: Validate that all of the required
-            // task ids have been completed before executing.
-            // 3rd: Make sure the task is executable
-            // in the specified resource.
-            if task_id != None
-                && dag.get_task(**task_id.as_ref().unwrap()).state == TaskState::Ready
-                && evaluate(dag, **task_id.as_ref().unwrap(), &system, k)
-            {
-                let task = &dag.get_task(**task_id.as_ref().unwrap()).clone();
-                let cores_to_assign = if task.max_cores > resource.cores {
-                    resource.cores
+                let n_queue_sub_index_navigation = if self.strategy.ptq_navigation_criterion == PTQNavigationCriterion::Whole {
+                    self.processor_task_queues.queue_len(queue_index) // navigates all elements in PTQ_{queue_index}
+                } else if self.strategy.ptq_navigation_criterion == PTQNavigationCriterion::Front {
+                    1 // Only use front element in PTQ_{queue_index} before checking the next PTQ
                 } else {
-                    task.max_cores
+                    1
                 };
+                for queue_sub_index in 0..n_queue_sub_index_navigation {
+                    let task_id = self.processor_task_queues.get_element_mut(queue_index, queue_sub_index);
 
-                // Schedule the task into the k'th processor,
-                // if it passes the requirements to be
-                // assigned.
-                result.push(Action::ScheduleTask {
-                    task: self.processor_task_queues.dequeue(k).unwrap(),
-                    resource: k,
-                    cores: cores_to_assign, // TODO: Might have to determine cores based on task's min-max cores and resource cores.
-                    expected_span: None,
-                });
-            } else {
-                // Otherwise, we navigate to the other
-                // ptqs and verify if they contain a task that
-                // meet the criteria.
-
-                // NOTE: I'm only validating the front task in each queue,
-                // but I might have to change it so that it takes
-                // into consideration their other queued tasks as well.
-
-                // NOTE: I'm skipping the k'th resource since we have
-                // to skip the current processor's ptq for if we're entering
-                // this case.
-                for z in 0..system.resources.len() {
-                    let queue_index = (z + k) % system.resources.len();
-
-                    if queue_index == k {
-                        // Skip ptq that was already verified.
-                        continue;
-                    }
-
-                    task_id = self.processor_task_queues.get_element_mut(queue_index, 0);
-
+                    // 1st: Validate that ptq is not empty.
+                    // 2nd: Validate that all of the required
+                    // task ids have been completed before executing.
+                    // 3rd: Make sure the task is executable
+                    // in the specified resource.
+>>>>>>> refactor-dytas
                     if task_id != None
                         && dag.get_task(**task_id.as_ref().unwrap()).state == TaskState::Ready
                         && evaluate(dag, **task_id.as_ref().unwrap(), &system, k)
                     {
-                        let task = &dag.get_task(**task_id.as_ref().unwrap()).clone();
+                        let task = &dag.get_task(**task_id.as_ref().unwrap());
+
+                        // NOTE: Cores management isn't discussed for DYTAS... So i implemented
+                        // a very basic assignment of cores here.
+>>>>>>> refactor-dytas
                         let cores_to_assign = if task.max_cores > resource.cores {
                             resource.cores
                         } else {
                             task.max_cores
                         };
 
-                        // Schedule task on k'th processor
+                        // Schedule the task into the k'th processor,
+                        // if it passes the requirements to be
+                        // assigned.
                         result.push(Action::ScheduleTask {
-                            task: self.processor_task_queues.dequeue(queue_index).unwrap(),
+                            task: self
+                                .processor_task_queues
+                                .remove_element(queue_index, queue_sub_index)
+                                .unwrap(),
+>>>>>>> refactor-dytas
                             resource: k,
                             cores: cores_to_assign,
                             expected_span: None,
                         });
-                        break; // Removing this break alone increases the makespan. Please leave it. It also alings with the paper's implementation.
+                        break 'outer; // Breaking loop to go to the next processor
                     }
                 }
             }
@@ -274,7 +299,7 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
 
         // dispatch_task_queue = vec![25, 0, 18, 7, 6, 3, 2, 1, 13, 5, 9, 15, 4, 16, 11, 8, 14, 19, 12, 10, 22, 20, 17, 23, 21, 24, 26];
         // dispatch_task_queue.reverse();
-        // Distributing tasks into the processor_task_queues
+        // Distributing tasks into the processor_task_queues in round robin fashion.
         'outer: loop {
             for i in 0..system.resources.len() {
                 let Some(task_id) = dispatch_task_queue.last() else {
