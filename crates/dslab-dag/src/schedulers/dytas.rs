@@ -14,6 +14,15 @@ use strum_macros::Display;
 use strum_macros::EnumIter;
 use strum_macros::EnumString;
 
+struct Resource {
+    id: usize,
+    cores: u32,
+    cores_available: u32,
+    memory: u64,
+    memory_available: u64,
+    speed: f64
+}
+
 struct QueueSet<T> {
     /// This will contain the processor task queue of each
     /// resource.
@@ -87,13 +96,13 @@ impl<T> QueueSet<T> {
 }
 
 /// Validates that the task is able to be executed in the specified resource.
-pub fn evaluate(dag: &DAG, task_id: usize, system: &System, resource: usize) -> bool {
+pub fn evaluate(dag: &DAG, task_id: usize, resources: &Vec<Resource>, resource: usize) -> bool {
     let need_cores = dag.get_task(task_id).min_cores;
-    if system.resources[resource].compute.borrow().cores_total() < need_cores {
+    if resources[resource].cores_available < need_cores {
         return false;
     }
     let need_memory = dag.get_task(task_id).memory;
-    if system.resources[resource].compute.borrow().memory_total() < need_memory {
+    if resources[resource].memory_available < need_memory {
         return false;
     }
     if !dag.get_task(task_id).is_allowed_on(resource) {
@@ -110,23 +119,33 @@ pub enum PTQNavigationCriterion {
 #[derive(Clone, Debug, PartialEq, Display, EnumIter, EnumString)]
 pub enum TaskSortingCriterion {
     Khan, // Khan's topological sorting algorithm
-    DFS // Depth First Search topological sort implemented in dslab
+    DFS,  // Depth First Search topological sort implemented in dslab
+}
+#[derive(Clone, Debug, PartialEq, Display, EnumIter, EnumString)]
+pub enum MultiCoreCriterion {
+    SkipActiveNodes, // If a processor is active, skip it. Only one task is assigned at a time per processor.
+    UseAllCores,     // Fill up all of a processor's cores even if the processor is active to maximize core usage.
 }
 
 #[derive(Clone, Debug)]
 pub struct Strategy {
     pub ptq_navigation_criterion: PTQNavigationCriterion,
-    pub task_sorting_criterion: TaskSortingCriterion
+    pub task_sorting_criterion: TaskSortingCriterion,
+    pub multi_core_criterion: MultiCoreCriterion,
 }
 
 impl Strategy {
     pub fn from_params(params: &SchedulerParams) -> Self {
         let ptq_navigation_criterion_str: String = params.get("navigation").unwrap();
         let task_sorting_criterion_str: String = params.get("sorting").unwrap();
+        let multi_core_criterion_str: String = params.get("multicore").unwrap();
         Self {
             ptq_navigation_criterion: PTQNavigationCriterion::from_str(&ptq_navigation_criterion_str)
                 .expect("Wrong criterion: {ptq_navigation_criterion_str}"),
-            task_sorting_criterion: TaskSortingCriterion::from_str(&task_sorting_criterion_str).expect("Wrong criterion: {task_sorting_criterion_str}")
+            task_sorting_criterion: TaskSortingCriterion::from_str(&task_sorting_criterion_str)
+                .expect("Wrong criterion: {task_sorting_criterion_str}"),
+            multi_core_criterion: MultiCoreCriterion::from_str(&multi_core_criterion_str)
+                .expect("Wrong criterion: {multi_core_criterion_str}"),
         }
     }
 }
@@ -211,24 +230,48 @@ impl DynamicTaskSchedulingAlgorithm {
     fn schedule(&mut self, dag: &DAG, system: System, _ctx: &SimulationContext) -> Vec<Action> {
         let mut result = Vec::new();
 
-        for (k, resource) in system.resources.iter().enumerate() {
+        // Cloning the current state of resources
+        let mut resources: Vec<Resource> = system
+            .resources
+            .iter()
+            .enumerate()
+            .map(|(id, resource)| Resource {
+                id,
+                cores: resource.cores,
+                cores_available: resource.cores_available,
+                memory: resource.memory,
+                memory_available: resource.memory_available,
+                speed: resource.speed,
+            })
+            .collect();
+
+        let resources_length = resources.len();
+
+        for k in 0..resources_length {
             // Validate if the k'th processors is in
             // a running state. This will be determined
             // by validateing the number of available cores.
 
-            if resource.cores_available != resource.cores {
+            if self.strategy.multi_core_criterion == MultiCoreCriterion::SkipActiveNodes
+                && resources[k].cores_available != resources[k].cores
+            {
                 // This will be taken to indicate that
                 // the resource is in running state,
                 // thus we'll skip to the next processor
+                continue;
+            } else if self.strategy.multi_core_criterion == MultiCoreCriterion::UseAllCores
+                && resources[k].cores_available == 0
+            {
+                // skip if no cores are available.
                 continue;
             }
 
             // This loop accesses the ptq_k, but if no tasks in it are
             // ready for execution, the loop navigates through PTQ_{k+1} and so on
             // to get a suitable task.
-            'outer: for i in 0..system.resources.len() {
+            'outer: for i in 0..resources_length {
                 // Queue index should go from k..n and then from 0..k
-                let queue_index = (i + k) % system.resources.len();
+                let queue_index = (i + k) % resources_length;
 
                 let n_queue_sub_index_navigation =
                     if self.strategy.ptq_navigation_criterion == PTQNavigationCriterion::Whole {
@@ -248,14 +291,14 @@ impl DynamicTaskSchedulingAlgorithm {
                     // in the specified resource.
                     if task_id != None
                         && dag.get_task(**task_id.as_ref().unwrap()).state == TaskState::Ready
-                        && evaluate(dag, **task_id.as_ref().unwrap(), &system, k)
+                        && evaluate(dag, **task_id.as_ref().unwrap(), &resources, k)
                     {
                         let task = &dag.get_task(**task_id.as_ref().unwrap());
 
                         // NOTE: Cores management isn't discussed for DYTAS... So i implemented
                         // a very basic assignment of cores here.
-                        let cores_to_assign = if task.max_cores > resource.cores {
-                            resource.cores
+                        let cores_to_assign = if task.max_cores > resources[k].cores {
+                            resources[k].cores
                         } else {
                             task.max_cores
                         };
@@ -272,7 +315,13 @@ impl DynamicTaskSchedulingAlgorithm {
                             cores: cores_to_assign,
                             expected_span: None,
                         });
-                        break 'outer; // Breaking loop to go to the next processor
+
+                        if self.strategy.multi_core_criterion == MultiCoreCriterion::UseAllCores {
+                            resources[k].cores_available -= cores_to_assign;
+                            resources[k].memory_available -= task.memory;
+                        } else {
+                            break 'outer; // Breaking loop to go to the next processor
+                        }
                     }
                 }
             }
@@ -311,6 +360,21 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
             khan_topological_sort(dag)
         };
 
+        // Cloning the current state of resources
+        let mut resources: Vec<Resource> = system
+            .resources
+            .iter()
+            .enumerate()
+            .map(|(id, resource)| Resource {
+                id,
+                cores: resource.cores,
+                cores_available: resource.cores_available,
+                memory: resource.memory,
+                memory_available: resource.memory_available,
+                speed: resource.speed,
+            })
+            .collect();
+
         // dispatch_task_queue = vec![25, 0, 18, 7, 6, 3, 2, 1, 13, 5, 9, 15, 4, 16, 11, 8, 14, 19, 12, 10, 22, 20, 17, 23, 21, 24, 26];
         // dispatch_task_queue.reverse();
 
@@ -325,7 +389,7 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
 
                 // Verifying if the task is allowed on the processor
                 // before enqueuing it into its ptq
-                if evaluate(dag, *task_id, &system, i) {
+                if evaluate(dag, *task_id, &resources, i) {
                     self.processor_task_queues
                         .enqueue(i, dispatch_task_queue.pop().unwrap()); // Pop to confirm removing from dtq
                 }
