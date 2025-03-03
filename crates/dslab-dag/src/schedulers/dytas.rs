@@ -1,27 +1,15 @@
 use crate::dag::DAG;
 use crate::data_item::DataTransferMode;
+use crate::resource::Resource;
 use crate::runner::Config;
-use crate::scheduler::SchedulerParams;
-use crate::scheduler::{Action, Scheduler};
-use crate::schedulers::common::task_successors;
-use crate::schedulers::common::topsort;
+use crate::scheduler::{Action, Scheduler, SchedulerParams};
+use crate::schedulers::common::{task_successors, topsort};
 use crate::system::System;
 use crate::task::TaskState;
 use simcore::context::SimulationContext;
 use std::collections::VecDeque;
 use std::str::FromStr;
-use strum_macros::Display;
-use strum_macros::EnumIter;
-use strum_macros::EnumString;
-
-struct Resource {
-    id: usize,
-    cores: u32,
-    cores_available: u32,
-    memory: u64,
-    memory_available: u64,
-    speed: f64
-}
+use strum_macros::{Display, EnumIter, EnumString};
 
 struct QueueSet<T> {
     /// This will contain the processor task queue of each
@@ -231,19 +219,7 @@ impl DynamicTaskSchedulingAlgorithm {
         let mut result = Vec::new();
 
         // Cloning the current state of resources
-        let mut resources: Vec<Resource> = system
-            .resources
-            .iter()
-            .enumerate()
-            .map(|(id, resource)| Resource {
-                id,
-                cores: resource.cores,
-                cores_available: resource.cores_available,
-                memory: resource.memory,
-                memory_available: resource.memory_available,
-                speed: resource.speed,
-            })
-            .collect();
+        let mut resources: Vec<Resource> = system.resources.clone();
 
         let resources_length = resources.len();
 
@@ -256,7 +232,7 @@ impl DynamicTaskSchedulingAlgorithm {
                 && resources[k].cores_available != resources[k].cores
             {
                 // This will be taken to indicate that
-                // the resource is in running state,
+                // the processor is in running state,
                 // thus we'll skip to the next processor
                 continue;
             } else if self.strategy.multi_core_criterion == MultiCoreCriterion::UseAllCores
@@ -273,14 +249,11 @@ impl DynamicTaskSchedulingAlgorithm {
                 // Queue index should go from k..n and then from 0..k
                 let queue_index = (i + k) % resources_length;
 
-                let n_queue_sub_index_navigation =
-                    if self.strategy.ptq_navigation_criterion == PTQNavigationCriterion::Whole {
-                        self.processor_task_queues.queue_len(queue_index) // navigates all elements in PTQ_{queue_index}
-                    } else if self.strategy.ptq_navigation_criterion == PTQNavigationCriterion::Front {
-                        1 // Only use front element in PTQ_{queue_index} before checking the next PTQ
-                    } else {
-                        1
-                    };
+                let n_queue_sub_index_navigation = match self.strategy.ptq_navigation_criterion {
+                    PTQNavigationCriterion::Whole => self.processor_task_queues.queue_len(queue_index),// navigates all elements in PTQ_{queue_index}
+                    PTQNavigationCriterion::Front => 1// Only use front element in PTQ_{queue_index} before checking the next PTQ
+                };
+
                 for queue_sub_index in 0..n_queue_sub_index_navigation {
                     let task_id = self.processor_task_queues.get_element_mut(queue_index, queue_sub_index);
 
@@ -316,10 +289,10 @@ impl DynamicTaskSchedulingAlgorithm {
                             expected_span: None,
                         });
 
-                        if self.strategy.multi_core_criterion == MultiCoreCriterion::UseAllCores {
-                            resources[k].cores_available -= cores_to_assign;
-                            resources[k].memory_available -= task.memory;
-                        } else {
+                        resources[k].cores_available -= cores_to_assign;
+                        resources[k].memory_available -= task.memory;
+
+                        if self.strategy.multi_core_criterion != MultiCoreCriterion::UseAllCores {
                             break 'outer; // Breaking loop to go to the next processor
                         }
                     }
@@ -352,31 +325,12 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
         // let mut dispatch_task_queue = khan_topological_sort(dag);
         // dispatch_task_queue.reverse();
 
-        let mut dispatch_task_queue = if self.strategy.task_sorting_criterion == TaskSortingCriterion::DFS {
-            topsort(dag)
-        } else if self.strategy.task_sorting_criterion == TaskSortingCriterion::Khan {
-            khan_topological_sort(dag)
-        } else {
-            khan_topological_sort(dag)
+        let mut dispatch_task_queue = match self.strategy.task_sorting_criterion {
+            TaskSortingCriterion::DFS => topsort(dag),
+            TaskSortingCriterion::Khan => khan_topological_sort(dag)
         };
 
-        // Cloning the current state of resources
-        let mut resources: Vec<Resource> = system
-            .resources
-            .iter()
-            .enumerate()
-            .map(|(id, resource)| Resource {
-                id,
-                cores: resource.cores,
-                cores_available: resource.cores_available,
-                memory: resource.memory,
-                memory_available: resource.memory_available,
-                speed: resource.speed,
-            })
-            .collect();
-
         // dispatch_task_queue = vec![25, 0, 18, 7, 6, 3, 2, 1, 13, 5, 9, 15, 4, 16, 11, 8, 14, 19, 12, 10, 22, 20, 17, 23, 21, 24, 26];
-        // dispatch_task_queue.reverse();
 
         dispatch_task_queue.reverse();
         // Distributing tasks into the processor_task_queues in round robin fashion.
@@ -389,7 +343,7 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
 
                 // Verifying if the task is allowed on the processor
                 // before enqueuing it into its ptq
-                if evaluate(dag, *task_id, &resources, i) {
+                if evaluate(dag, *task_id, &system.resources, i) {
                     self.processor_task_queues
                         .enqueue(i, dispatch_task_queue.pop().unwrap()); // Pop to confirm removing from dtq
                 }
