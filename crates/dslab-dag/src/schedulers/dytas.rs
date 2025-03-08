@@ -46,12 +46,6 @@ impl<T> QueueSet<T> {
         }
     }
 
-    /// Dequeues the next task from the specified processor's task queue.
-    /// The queue_index specifies which processor the queue belongs to.
-    // pub fn dequeue(&mut self, queue_index: usize) -> Option<T> {
-    //     self.queues.get_mut(queue_index).and_then(|q| q.pop_front())
-    // }
-
     /// This will just return, but not remove, the task id of the specified index.
     /// The queue_index specifies which processor the queue belongs to.
     /// The queue_sub_index is the index within the specified queue to inspect.
@@ -64,55 +58,66 @@ impl<T> QueueSet<T> {
         self.queues.get_mut(queue_index)?.remove(queue_sub_index)
     }
 
-    // pub fn get_longest_queue_length(&mut self) -> usize {
-    //     let mut max_length = 0;
-    //     for i in 0..self.queues.len() {
-    //         if self.queues[i].len() > max_length {
-    //             max_length = self.queues[i].len();
-    //         }
-    //     }
-    //     max_length
-    // }
-
+    /// Returns the length of the specified queue
     pub fn queue_len(&mut self, queue_index: usize) -> usize {
         self.queues[queue_index].len()
     }
-
-    // pub fn get_queue(&mut self, index: usize) -> Option<&mut VecDeque<T>> {
-    //     self.queues.get_mut(index)
-    // }
 }
 
 /// Validates that the task is able to be executed in the specified resource.
 pub fn evaluate(dag: &DAG, task_id: usize, resources: &Vec<Resource>, resource: usize) -> bool {
-    let need_cores = dag.get_task(task_id).min_cores;
+    let need_cores = dag.get_task(task_id).min_cores; // Minimum number of required cores to run the task
     if resources[resource].cores_available < need_cores {
-        return false;
+        return false; // Processor does not have minimum number of required cores for the task
     }
-    let need_memory = dag.get_task(task_id).memory;
+    let need_memory = dag.get_task(task_id).memory; // memory required to run the task
     if resources[resource].memory_available < need_memory {
-        return false;
+        return false; // Resource does not have the required memory to run the task
     }
     if !dag.get_task(task_id).is_allowed_on(resource) {
-        return false;
+        return false; // The task has a restriction on the specified processor and cannot be executed on it.
     }
     true
 }
 
+/// The DYTAS paper hints towards the algorithm just checking the
+/// front of the PTQ_k before verifying the front task of PTQ_{k+1}
+/// if it cant execute the former. Due to this vagueness, I added this
+/// criteria to specify whether to verify if ANY of the of the tasks
+/// in PTQ_k, not just the front, are executable before
+/// checking all of the tasks in PTQ_{k+1}.
+///
+/// This could be a contribution to the algorithm.
 #[derive(Clone, Debug, PartialEq, Display, EnumIter, EnumString)]
 pub enum PTQNavigationCriterion {
-    Whole, // Validate all tasks of current processor's task queue (PTQ_k[0...n]) before verifying the next processor's task queue (PTQ_{k+1}[0...n])
+    All, // Validate all tasks of current processor's task queue (PTQ_k[0...n]) before verifying the next processor's task queue (PTQ_{k+1}[0...n])
     Front, // Only validates the task in the front of the current processor's task queue (PTQ_k[0]) before verifying the next processor's task queue (PTQ_{k+1}[0])
 }
+
+/// The DYTAS paper never specified which sorting algorithm they use,
+/// only that it is ordered by task dependencies. The one
+/// that is closest to the behavior of their example DAG after being
+/// sorted is Khan's algorithm. Nonetheless, both of these serve
+/// the purpose of sorting by dependency, one in some cases outperforming
+/// the other in sertain DAGs.
 #[derive(Clone, Debug, PartialEq, Display, EnumIter, EnumString)]
 pub enum TaskSortingCriterion {
     Khan, // Khan's topological sorting algorithm
     DFS,  // Depth First Search topological sort implemented in dslab
 }
+
+/// The DYTAS paper says that if a processor is active, skip it.
+/// Thus the assumed default behavior is SkipActiveProcessors, only
+/// allowing processors to execute 1 task at a time, leaving many cores
+/// idling which can hinder performance. This is why I added this criteria
+/// to enable more than 1 task to be scheduled on a single processor if
+/// UseAllCores is enabled. This showed improvements in makespan performance.
+///
+/// This could be a contribution to the algorithm.
 #[derive(Clone, Debug, PartialEq, Display, EnumIter, EnumString)]
 pub enum MultiCoreCriterion {
-    SkipActiveNodes, // If a processor is active, skip it. Only one task is assigned at a time per processor.
-    UseAllCores,     // Fill up all of a processor's cores even if the processor is active to maximize core usage.
+    SkipActiveProcessors, // If a processor is active, skip it. Only one task is assigned at a time per processor.
+    UseAllCores,          // Fill up all of a processor's cores even if the processor is active to maximize core usage.
 }
 
 #[derive(Clone, Debug)]
@@ -179,6 +184,7 @@ pub fn khan_topological_sort(dag: &DAG) -> Vec<usize> {
     sorted_tasks
 }
 
+/// Utility function to get the perdecessor tasks of a task in the dag.
 pub fn task_predecessors(v: usize, dag: &DAG) -> Vec<(usize, f64)> {
     let mut result = Vec::new();
     for &data_item_id in dag.get_task(v).inputs.iter() {
@@ -211,14 +217,15 @@ impl DynamicTaskSchedulingAlgorithm {
     }
 
     fn initialize_ptqs(&mut self, system: &System) {
-        // self.processor_task_queues = QueueSet::new(system.resources.len());
         self.processor_task_queues.add_queues(system.resources.len());
     }
 
     fn schedule(&mut self, dag: &DAG, system: System, _ctx: &SimulationContext) -> Vec<Action> {
         let mut result = Vec::new();
 
-        // Cloning the current state of resources
+        // Cloning the current state of resources. This is important since
+        // the clone will be modified during this scheduling period to assess
+        // task assignment if all cores in each processor are to be used.
         let mut resources: Vec<Resource> = system.resources.clone();
 
         let resources_length = resources.len();
@@ -228,7 +235,7 @@ impl DynamicTaskSchedulingAlgorithm {
             // a running state. This will be determined
             // by validateing the number of available cores.
 
-            if self.strategy.multi_core_criterion == MultiCoreCriterion::SkipActiveNodes
+            if self.strategy.multi_core_criterion == MultiCoreCriterion::SkipActiveProcessors
                 && resources[k].cores_available != resources[k].cores
             {
                 // This will be taken to indicate that
@@ -250,8 +257,8 @@ impl DynamicTaskSchedulingAlgorithm {
                 let queue_index = (i + k) % resources_length;
 
                 let n_queue_sub_index_navigation = match self.strategy.ptq_navigation_criterion {
-                    PTQNavigationCriterion::Whole => self.processor_task_queues.queue_len(queue_index),// navigates all elements in PTQ_{queue_index}
-                    PTQNavigationCriterion::Front => 1// Only use front element in PTQ_{queue_index} before checking the next PTQ
+                    PTQNavigationCriterion::All => self.processor_task_queues.queue_len(queue_index), // navigates all elements in PTQ_{queue_index}
+                    PTQNavigationCriterion::Front => 1, // Only use front element in PTQ_{queue_index} before checking the next PTQ
                 };
 
                 for queue_sub_index in 0..n_queue_sub_index_navigation {
@@ -268,7 +275,7 @@ impl DynamicTaskSchedulingAlgorithm {
                     {
                         let task = &dag.get_task(**task_id.as_ref().unwrap());
 
-                        // NOTE: Cores management isn't discussed for DYTAS... So i implemented
+                        // NOTE: Cores management isn't discussed for DYTAS... So I implemented
                         // a very basic assignment of cores here.
                         let cores_to_assign = if task.max_cores > resources[k].cores {
                             resources[k].cores
@@ -276,9 +283,7 @@ impl DynamicTaskSchedulingAlgorithm {
                             task.max_cores
                         };
 
-                        // Schedule the task into the k'th processor,
-                        // if it passes the requirements to be
-                        // assigned.
+                        // Schedule the task into the k'th processor
                         result.push(Action::ScheduleTask {
                             task: self
                                 .processor_task_queues
@@ -289,11 +294,16 @@ impl DynamicTaskSchedulingAlgorithm {
                             expected_span: None,
                         });
 
+                        // Adjusting the amount of cores and memory the resource has
+                        // for future ask assignment on the resource.
                         resources[k].cores_available -= cores_to_assign;
                         resources[k].memory_available -= task.memory;
 
-                        if self.strategy.multi_core_criterion != MultiCoreCriterion::UseAllCores {
+                        if self.strategy.multi_core_criterion == MultiCoreCriterion::SkipActiveProcessors {
                             break 'outer; // Breaking loop to go to the next processor
+                        } else if self.strategy.multi_core_criterion == MultiCoreCriterion::UseAllCores {
+                            // In this case, don't do anything to continue the loop to stay in the
+                            // current processor and see which other tasks can be assigned to it.
                         }
                     }
                 }
@@ -316,22 +326,10 @@ impl Scheduler for DynamicTaskSchedulingAlgorithm {
         self.initialize_ptqs(&system);
 
         // Sorting the tasks by dependency in the dispatch task queue.
-        // NOTE: Verify if changing the sorting methodology affects performance.
-        // let mut dispatch_task_queue = topsort(dag);
-        // dispatch_task_queue.reverse(); // Reversing so that I can pop easily next in sorted order.
-
-        // NOTE: This sorting methodology achieves better makespan results than
-        // the one above.
-        // let mut dispatch_task_queue = khan_topological_sort(dag);
-        // dispatch_task_queue.reverse();
-
         let mut dispatch_task_queue = match self.strategy.task_sorting_criterion {
             TaskSortingCriterion::DFS => topsort(dag),
-            TaskSortingCriterion::Khan => khan_topological_sort(dag)
+            TaskSortingCriterion::Khan => khan_topological_sort(dag),
         };
-
-        // dispatch_task_queue = vec![25, 0, 18, 7, 6, 3, 2, 1, 13, 5, 9, 15, 4, 16, 11, 8, 14, 19, 12, 10, 22, 20, 17, 23, 21, 24, 26];
-
         dispatch_task_queue.reverse();
         // Distributing tasks into the processor_task_queues in round robin fashion.
         'outer: loop {
