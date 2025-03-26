@@ -189,7 +189,10 @@ pub fn task_predecessors(v: usize, dag: &DAG) -> Vec<(usize, f64)> {
     let mut result = Vec::new();
     for &data_item_id in dag.get_task(v).inputs.iter() {
         let data_item = dag.get_data_item(data_item_id);
-        result.push((data_item.producer.unwrap(), data_item.size));
+        // First node will have no producer.
+        if data_item.producer != None{
+            result.push((data_item.producer.unwrap(), data_item.size));
+        }
     }
     result
 }
