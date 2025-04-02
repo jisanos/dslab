@@ -1,0 +1,21 @@
+network:
+  bandwidth: 1250
+  latency: 1000
+  model: SharedBandwidth
+resources:
+- cores: 4
+  memory: 8000
+  name: node1
+  speed: 6
+- cores: 4
+  memory: 8000
+  name: node2
+  speed: 5
+- cores: 16
+  memory: 32000
+  name: node3
+  speed: 4
+- cores: 8
+  memory: 16000
+  name: node4
+  speed: 2.5

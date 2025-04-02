@@ -1,0 +1,134 @@
+resources:
+  - name: node1
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node2
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node3
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node4
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node5
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node6
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node7
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node8
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node9
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node10
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node11
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node12
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node13
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node14
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node15
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node16
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node17
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node18
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node19
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node20
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node21
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node22
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node23
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node24
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node25
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node26
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node27
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node28
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node29
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node30
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node31
+    speed: 4
+    cores: 8
+    memory: 16000
+  - name: node32
+    speed: 4
+    cores: 8
+    memory: 16000
+                    
+network:
+  model: ConstantBandwidth
+  bandwidth: 12500
+  latency: 100
