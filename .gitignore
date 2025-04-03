@@ -23,3 +23,19 @@ examples-other/vetand_cloudsim_benchmark/target
 
 # Flamegraph 
 *.svg 
+
+# Python Notebook Checkpoints
+.ipynb_checkpoints
+
+# Dag files
+dags
+archived dags
+
+# Results
+benchmark-results
+old results
+final results
+bad results
+
+# Processed results
+dytas-benchmark/dytas-comparisons/analysis/data
