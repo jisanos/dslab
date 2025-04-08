@@ -34,7 +34,7 @@ fn main() {
             "memory": task.memory,
             "min_cores": task.min_cores,
             "max_cores": task.max_cores,
-            "parent": task_predecessors(id, &dag).iter().map(|(first, _)| *first).collect::<Vec<usize>>(),
+            "parents": task_predecessors(id, &dag).iter().map(|(first, _)| *first).collect::<Vec<usize>>(),
             "children": task_successors(id, &dag).iter().map(|(first, _)| *first).collect::<Vec<usize>>()
         })
     }).collect();
