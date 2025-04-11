@@ -4,14 +4,15 @@ systems:
   - systems
 data_transfer_mode: Direct
 schedulers:
-  - DYTAS[navigation=Front,sorting=DFS,multicore=SkipActiveProcessors]
-  - DYTAS[navigation=Front,sorting=Khan,multicore=SkipActiveProcessors]
-  - DYTAS[navigation=All,sorting=DFS,multicore=SkipActiveProcessors]
-  - DYTAS[navigation=All,sorting=Khan,multicore=SkipActiveProcessors]
-  - DYTAS[navigation=Front,sorting=DFS,multicore=UseAllCores]
-  - DYTAS[navigation=Front,sorting=Khan,multicore=UseAllCores]
-  - DYTAS[navigation=All,sorting=DFS,multicore=UseAllCores]
-  - DYTAS[navigation=All,sorting=Khan,multicore=UseAllCores]
-  - HEFT
-  - DLS
-  - DynamicList[task=CompSize,resource=Speed,cores=MaxCores]
+  # - DYTAS[navigation=Front,sorting=DFS,multicore=SkipActiveProcessors]
+  # - DYTAS[navigation=Front,sorting=Khan,multicore=SkipActiveProcessors]
+  # - DYTAS[navigation=All,sorting=DFS,multicore=SkipActiveProcessors]
+  # - DYTAS[navigation=All,sorting=Khan,multicore=SkipActiveProcessors]
+  # - DYTAS[navigation=Front,sorting=DFS,multicore=UseAllCores]
+  # - DYTAS[navigation=Front,sorting=Khan,multicore=UseAllCores]
+  # - DYTAS[navigation=All,sorting=DFS,multicore=UseAllCores]
+  # - DYTAS[navigation=All,sorting=Khan,multicore=UseAllCores]
+  # - HEFT
+  # - DLS
+  # - DynamicList[task=CompSize,resource=Speed,cores=MaxCores]
+  - DynamicList[task=BottomLevel,resource=Speed,cores=MaxCores]
