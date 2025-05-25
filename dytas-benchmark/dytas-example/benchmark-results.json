@@ -1,0 +1,27 @@
+[
+  {
+    "dag": "dytas_test_dag",
+    "system": "dytas-test-system",
+    "scheduler": "DYTAS[navigation=Front,sorting=Khan,multicore=SkipActiveProcessors]",
+    "completed": true,
+    "makespan": 78.00000000000007,
+    "exec_time": 0.000976148,
+    "run_stats": {
+      "scheduling_time": 0.00009253899999999996,
+      "total_task_time": 240.0,
+      "total_network_traffic": 103.0,
+      "total_network_time": 4.121147867408581e-13,
+      "max_used_cores": 4,
+      "max_used_memory": 0,
+      "max_cpu_utilization": 0.8,
+      "max_memory_utilization": 0.0,
+      "cpu_utilization": 0.6153846153846149,
+      "memory_utilization": 0.0,
+      "used_resource_count": 5,
+      "cpu_utilization_used": 0.6153846153846148,
+      "memory_utilization_used": 0.0,
+      "cpu_utilization_active": 0.7547169811320751,
+      "memory_utilization_active": 0.0
+    }
+  }
+]
