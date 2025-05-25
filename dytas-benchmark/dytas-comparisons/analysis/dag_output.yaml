@@ -1,0 +1,237 @@
+inputs:
+- name: 1-input
+  size: 500
+- name: 2-input
+  size: 500
+- name: 3-input
+  size: 500
+- name: 4-input
+  size: 500
+tasks:
+- flops: 252665362872
+  inputs:
+  - 1-input
+  memory: 1000
+  name: '1'
+  outputs:
+  - name: 1-output-6
+    size: 536870912
+  - name: 1-output-7
+    size: 536870912
+- flops: 5673771415
+  inputs:
+  - 2-input
+  memory: 1000
+  name: '2'
+  outputs:
+  - name: 2-output-6
+    size: 134217728
+  - name: 2-output-7
+    size: 134217728
+- flops: 368293445632
+  inputs:
+  - 3-input
+  memory: 1000
+  name: '3'
+  outputs:
+  - name: 3-output-5
+    size: 411041792
+  - name: 3-output-6
+    size: 411041792
+- flops: 27892228089
+  inputs:
+  - 4-input
+  memory: 1000
+  name: '4'
+  outputs:
+  - name: 4-output-5
+    size: 679477248
+  - name: 4-output-6
+    size: 679477248
+  - name: 4-output-7
+    size: 679477248
+- flops: 2815110853
+  inputs:
+  - 3-output-5
+  - 4-output-5
+  memory: 1000
+  name: '5'
+  outputs:
+  - name: 5-output-8
+    size: 75497472
+  - name: 5-output-9
+    size: 75497472
+  - name: 5-output-10
+    size: 75497472
+- flops: 11471899410
+  inputs:
+  - 1-output-6
+  - 2-output-6
+  - 3-output-6
+  - 4-output-6
+  memory: 1000
+  name: '6'
+  outputs:
+  - name: 6-output-8
+    size: 209715200
+  - name: 6-output-10
+    size: 209715200
+- flops: 4942522435
+  inputs:
+  - 1-output-7
+  - 2-output-7
+  - 4-output-7
+  memory: 1000
+  name: '7'
+  outputs:
+  - name: 7-output-8
+    size: 134217728
+  - name: 7-output-10
+    size: 134217728
+- flops: 647799252469
+  inputs:
+  - 5-output-8
+  - 6-output-8
+  - 7-output-8
+  memory: 1000
+  name: '8'
+  outputs:
+  - name: 8-output-11
+    size: 411041792
+  - name: 8-output-12
+    size: 411041792
+  - name: 8-output-13
+    size: 411041792
+- flops: 28991029248
+  inputs:
+  - 5-output-9
+  memory: 1000
+  name: '9'
+  outputs:
+  - name: 9-output-11
+    size: 75497472
+  - name: 9-output-12
+    size: 75497472
+  - name: 9-output-13
+    size: 75497472
+- flops: 782757789696
+  inputs:
+  - 5-output-10
+  - 6-output-10
+  - 7-output-10
+  memory: 1000
+  name: '10'
+  outputs:
+  - name: 10-output-11
+    size: 679477248
+  - name: 10-output-12
+    size: 679477248
+  - name: 10-output-13
+    size: 679477248
+- flops: 368293445632
+  inputs:
+  - 8-output-11
+  - 9-output-11
+  - 10-output-11
+  memory: 1000
+  name: '11'
+  outputs:
+  - name: 11-output-14
+    size: 411041792
+  - name: 11-output-16
+    size: 411041792
+- flops: 782757789696
+  inputs:
+  - 8-output-12
+  - 9-output-12
+  - 10-output-12
+  memory: 1000
+  name: '12'
+  outputs:
+  - name: 12-output-14
+    size: 679477248
+  - name: 12-output-16
+    size: 679477248
+- flops: 424078292590
+  inputs:
+  - 8-output-13
+  - 9-output-13
+  - 10-output-13
+  memory: 1000
+  name: '13'
+  outputs:
+  - name: 13-output-15
+    size: 411041792
+  - name: 13-output-16
+    size: 411041792
+- flops: 43529196943
+  inputs:
+  - 11-output-14
+  - 12-output-14
+  memory: 1000
+  name: '14'
+  outputs:
+  - name: 14-output-17
+    size: 209715200
+  - name: 14-output-20
+    size: 209715200
+- flops: 411669320294
+  inputs:
+  - 13-output-15
+  memory: 1000
+  name: '15'
+  outputs:
+  - name: 15-output-17
+    size: 301989888
+  - name: 15-output-18
+    size: 301989888
+  - name: 15-output-19
+    size: 301989888
+  - name: 15-output-20
+    size: 301989888
+- flops: 9664365441
+  inputs:
+  - 11-output-16
+  - 12-output-16
+  - 13-output-16
+  memory: 1000
+  name: '16'
+  outputs:
+  - name: 16-output-17
+    size: 679477248
+  - name: 16-output-19
+    size: 679477248
+  - name: 16-output-19
+    size: 679477248
+  - name: 16-output-20
+    size: 679477248
+- flops: 68719476736
+  inputs:
+  - 14-output-17
+  - 15-output-17
+  - 16-output-17
+  memory: 1000
+  name: '17'
+  outputs: []
+- flops: 3029467806
+  inputs:
+  - 15-output-18
+  memory: 1000
+  name: '18'
+  outputs: []
+- flops: 11491780925
+  inputs:
+  - 15-output-19
+  - 16-output-19
+  - 16-output-19
+  memory: 1000
+  name: '19'
+  outputs: []
+- flops: 21853704917
+  inputs:
+  - 14-output-20
+  - 15-output-20
+  - 16-output-20
+  memory: 1000
+  name: '20'
+  outputs: []
