@@ -1,0 +1,13 @@
+dags:
+  - dags
+dag_parser:
+  reference_speed: 1
+  ignore_memory: true
+systems:
+  - systems
+data_transfer_mode: Direct
+schedulers:
+  - DYTAS[navigation=Front,sorting=Khan,multicore=SkipActiveProcessors]
+  # - DYTAS[navigation=All,sorting=Khan,multicore=UseAllCores]
+  # - HEFT
+  # - DynamicList[task=BottomLevel,resource=Speed,cores=MaxCores]
