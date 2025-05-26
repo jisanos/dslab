@@ -1,3 +1,9 @@
+# Benchmarking DYTAS
+
+This fork of DSLab also contains result files and analysis for my thesis which compares DYTAS, Dynamic List, and HEFT. This fork has an implementation of DYTAS (Amalarethinam & Mary, 2011) which I added to the framework for the sake of benchmarking it. During implementation of it, variants were created, hence criterias specified to it before execution change its behavior.
+
+The repository also contains other rust packages (dag-export and dag-stats) that allowed me to analyze the data accurately based on how DSLab processed it.
+
 # DSLab
 
 DSLab is a modular framework for simulation of distributed systems.
